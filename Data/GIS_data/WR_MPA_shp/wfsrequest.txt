@@ -1,0 +1,1 @@
+http://msmap1.atkinsgeospatial.com/geoserver/nmpwfs/ows?token=d46ffd2a-e192-4e51-8a6a-b3292c20f1ee?token=d46ffd2a-e192-4e51-8a6a-b3292c20f1ee&service=wfs&request=getFeature&typeName=nmpwfs:area_management_marine_conservation_orders&outputFormat=shape-zip&srsName=EPSG:4326
