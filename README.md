@@ -20,12 +20,11 @@ Elasmobranchs are globally threatened and experiencing ongoing declines. Underst
 
 ```
 .
-├── data/                      # CSV data files for species presence and environmental covariates
-├── Temperate_elasmobranchs.Rmd        # Master RMarkdown script for entire analysis workflow
-├── figures/                   # Model outputs, maps and summary figures
-├── LICENSE
+├── Data/                              # CSV data files for species presence (link supplied)
+  └── GIS_Data                         # Sample location metadata, environmental covariates and files used for mapping (link supplied)
+├── LICENSE 
 ├── README.md
-└── requirements.txt           # List of R packages for reproducibility
+└── Temperate_elasmobranchs.Rmd        # Master RMarkdown script for entire analysis workflow
 ```
 
 ---
