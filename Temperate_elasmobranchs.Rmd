@@ -1,0 +1,5183 @@
+---
+title: "Scotland sharks"
+author: "Neil Burns"
+date: "2025-06-01"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+
+#setup
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+
+
+
+#setup
+# Reset R's brain
+rm(list=ls())
+
+# getwd tells us where R is looking
+getwd()
+
+setwd("~")
+
+
+library(sf)
+library(terra)
+library(INLA)
+library(RColorBrewer)
+inla.upgrade(testing = FALSE)
+getwd()
+
+
+dat<- read.csv("~Shark_data.csv")
+
+######### organise data
+dat$Waypoint<- as.character(dat$Waypoint)
+dat$Frame<- as.factor(dat$Frame)
+dat$Camera.viewed<- as.factor(dat$Camera.viewed)
+dat$Seabed<- as.factor(dat$Seabed)
+dat$Skate_Sex<- as.factor(dat$Skate_Sex)
+dat$Thornback_Sex<- as.factor(dat$Thornback_Sex)
+dat$Location<- as.factor(dat$Location)
+dat$Year<- as.factor(dat$Year)
+
+dat$Date<- as.Date(dat$Date)
+
+
+### remove waypoint 30 from shark data because no meta data, camera footage obscured.
+dat<- dat[-which(dat$Waypoint=='30'),]
+
+
+### make data frame into spatial
+dat.s<- st_as_sf(dat,coords =c(3,4), crs= 4326)
+
+
+
+dat.T<- st_transform(dat.s, crs=27700)
+
+```
+
+
+#Descriptive statistics
+##Total numbers etc
+```{r}
+
+# calculate pres abs from maxN
+
+pres<- dat[,c(15,20,25,30,34,38)]/dat[,c(15,20,25,30,34,38)]
+head(pres)
+pres<- replace(pres, is.na(pres), 0)
+names(pres)<- c("pres.ab.Skate",      "pres.ab.Dogfish",    "pres.ab.Thornback",  "pres.ab.Spurdog",    "pres.ab.SpottedRay", "pres.ab.Porbeagle")
+
+dat<- cbind(dat, pres)
+### calculate sepcies richness for descriptive stats
+rich<- spp.count[,c(-1,-2)]/spp.count[,c(-1,-2)]
+rich <- replace(rich, is.na(rich), 0) #(replace NaNs with 0)
+
+shark.rich<- data.frame(richness=apply(rich, MARGIN= 1, FUN= sum))
+shark.rich<- cbind(shark.rich, Year=c(2021,2022,2022, 2023, 2023),
+                   Location= c("Eriboll", "Eriboll", "WRoss", "Eriboll", "WRoss"))
+
+
+
+
+```
+
+
+#Seabed, depth, seascape
+```{r}
+
+
+shore.er<- st_read(dsn='~shoreline.shp', layer="shoreline")
+
+
+
+broom.terT<- st_read(dsn='~LLbroom_terrain.shp')
+
+shore.wr<- subset(broom.terT, broom.terT$SUB_TYPE=='meanHighWater')
+
+Er.ext<- c(xmin=238800, ymin=953700, xmax=252000,  ymax=969700)
+Wr.ext<- c(xmin=186000, xmax=209400, ymin=887000, ymax=900000)
+
+shore.er<- st_crop(shore.er, Er.ext)
+
+
+### depth
+
+depth.er <- rast(x = "~bathy.grd")
+
+
+depth.wr<- rast('~LLbroom_bathy.grd')
+plot(depth.wr)
+
+### slope and aspect for hillshade
+slo.er<- rast(x = "~slo_trim.grd")
+
+
+slo.wr<- rast('~slope.grd')
+
+
+
+asp.er<- rast(x = "~/asp_trim.grd")
+
+
+asp.wr<- rast('~aspect.grd')
+
+
+hill.er<- shade(slo.er, asp.er, angle=55, direction=100, normalize =T)
+hill.wr<- shade(slo.wr, asp.wr, angle=55, direction=100, normalize =T)
+
+
+hill.col<- colorRampPalette(c('floralwhite','antiquewhite1', 'antiquewhite2', 'antiquewhite3', 'antiquewhite4'), bias=0.5)
+
+
+
+depth.heat<- colorRampPalette(rev(brewer.pal(9,'Blues')[2:9]))
+
+
+# Seabed data
+# remove any blanks in data tidy from substrata1 so all data should match
+
+
+dat21Er<-read.csv("~Loch_Eriboll_2021_substrata.csv")
+
+head(dat21Er)
+dat21Er<- dat21Er[,-c(12:17)]
+dat21Er[which(dat21Er$Substratum1==''),]
+dat21Er<- dat21Er[which(dat21Er$Substratum1!=''),]
+dat21Er$Year<- 2021
+
+
+dat22Er<-read.csv("~Loch_Eriboll_2022_substrata.csv")
+
+head(dat22Er)
+dat22Er<- dat22Er[,-c(12:17)]
+dat22Er[which(dat22Er$Substratum1==''),]
+dat22Er<- dat22Er[which(dat22Er$Substratum1!=''),]
+dat22Er$Year<- 2022
+
+
+
+dat23Er<-read.csv("~Eriboll_2023_substrata.csv")
+
+head(dat23Er)
+dat23Er[which(dat23Er$Substratum1==''),]
+dat23Er<- dat23Er[which(dat23Er$Substratum1!=''),]
+dat23Er$Year<- 2023
+
+
+
+dat22WR<-read.csv("~Wester_Ross_2022_substrata.csv")
+
+head(dat22WR)
+dat22WR$Substratum1 ## change maerl here to gravel
+dat22WR$Substratum1[dat22WR$Substratum1=='maerl']<- 'gravel'
+dat22WR$Year<- 2022
+
+
+dat22WR<- dat22WR[,-c(12:17)]
+dat22WR[,2]<- dat22WR[,2]*-1
+dat22WR<- dat22WR[which(dat22WR$Substratum1!=''),]
+
+
+
+dat23WR<-read.csv("~WesterRoss_2023_substrata.csv")
+
+head(dat23WR)
+dat23WR<- dat23WR[which(dat23WR$Substratum1!=''),]
+dat23WR$Year<- 2023
+
+
+met.dat.er<- rbind(dat21Er, dat22Er, dat23Er)
+
+
+
+
+met.dat.wr<- rbind(dat22WR, dat23WR)
+
+### remove videos which didn't work but substrata was visible and recorded (these ones don't' appear in the shark data record)
+
+# WRoss
+#R69
+#R72
+#S30
+
+met.dat.wr<- met.dat.wr[ -which(met.dat.wr$Waypoint=='R69'),  ]
+
+met.dat.wr<- met.dat.wr[-which(met.dat.wr$Waypoint=='R72'),]
+
+met.dat.wr<- met.dat.wr[-which(met.dat.wr$Waypoint=='S30'),]
+
+#Eriboll
+# 211
+#W251
+# W921
+
+
+met.dat.er<- met.dat.er[ -which(met.dat.er$Waypoint=='211'),  ]
+met.dat.er<- met.dat.er[ -which(met.dat.er$Waypoint=='W251'),  ]
+met.dat.er<- met.dat.er[ -which(met.dat.er$Waypoint=='W921'),  ]
+
+
+##### make these into spatial points
+
+
+met.dat.Ser<- st_as_sf(met.dat.er,coords =c(2,3), crs= 4326)
+
+
+
+met.dat.Ser.T<- st_transform(met.dat.Ser, crs=27700)
+
+met.dat.SWR<- st_as_sf(met.dat.wr,coords =c(2,3), crs= 4326)
+
+
+
+met.dat.SWR.T<- st_transform(met.dat.SWR, crs=27700)
+
+### larger spatial extent used to extract depths
+
+# 
+large1.er <- rast(x = "~mtf5058010045.asc")
+large2.er <- rast(x = "~mtf5058010050.asc")
+large3.er <- rast(x = "~mtf5058510045.asc")
+large4.er <- rast(x = "~mtf5058510050.asc")
+
+
+large.er<- merge(large1.er, large2.er, large3.er, large4.er)
+
+
+large.erT<- project(large.er, "EPSG:27700")
+
+#WRoss
+  
+#
+large1.wr <- rast(x = "~mtf5057510055.asc")
+large2.wr <- rast(x = "~mtf5057510060.asc")
+
+large.wr<- merge(large1.wr, large2.wr)
+large.wrT<- project(large.wr, "EPSG:27700")
+
+#####  extract depths at points on large depth raster
+
+er.depth<- extract(large.erT, met.dat.Ser.T, method='simple')[,2]
+er.depth[er.depth > -0.4]<- -0.5
+met.dat.Ser.T<- cbind(met.dat.Ser.T, er.depth)
+names(met.dat.Ser.T)[11]<- 'depth'
+
+
+wr.depth<- extract(large.wrT, met.dat.SWR.T, method='simple')[,2]
+met.dat.SWR.T<- cbind(met.dat.SWR.T, wr.depth)
+names(met.dat.SWR.T)[11]<- 'depth'
+
+
+
+
+```
+
+
+# data for plot set up and import MPA shape
+
+```{r}
+
+
+#####################Eriboll ######################
+
+head(dat)
+shark.er<- subset(dat, dat$Location=='Eriboll')
+head(shark.er)
+
+dat.er<- st_as_sf(shark.er,coords =c(3,4), crs= 4326)
+
+dat.erT<- st_transform(dat.er, crs=27700)
+
+e21<- subset(met.dat.Ser.T, dat.erT$Year==2021)
+e22<- subset(met.dat.Ser.T, dat.erT$Year==2022)
+e23<- subset(met.dat.Ser.T, dat.erT$Year==2023)
+
+s21<- subset(dat.erT, dat.erT$Year==2021)
+s22<- subset(dat.erT, dat.erT$Year==2022)
+s23<- subset(dat.erT, dat.erT$Year==2023)
+
+ x<- st_coordinates(e21)[,1]
+ y<- st_coordinates(e21)[,2]
+# 
+ halo(x,y, labels = as.character(e21$Waypoint))
+plot(s21[,1], add=T, col='red', pch=19, cex=0.7 )
+
+ dark_palette_colors <- c("#222222", "#333333", "#444444", "#555555", "#666666", "#777777")
+
+dark1<- colorRampPalette(dark_palette_colors)
+
+
+
+
+################################ W Ross #############
+
+
+
+shark.wr<- subset(dat, dat$Location=='WR')
+
+
+dat.wr<- st_as_sf(shark.wr,coords =c(3,4), crs= 4326)
+
+
+
+dat.wrT<- st_transform(dat.wr, crs=27700)
+
+
+WR22<- subset(dat.wrT, dat.wrT$Year==2022)
+WR23<- subset(dat.wrT, dat.wrT$Year==2023)
+
+# 
+# x<- st_coordinates(dat.wrT)[,1]
+# y<- st_coordinates(dat.wrT)[,2]
+# 
+# halo(x,y, labels = as.character(dat.wrT$Waypoint))
+
+########### WR MPA Shp file
+
+MPAs<- st_read(dsn='~area_management_marine_conservation_ordersPolygon.shp', layer="area_management_marine_conservation_ordersPolygon")
+names(MPAs)
+MPAs$objnam
+WR_MPA<- MPAs[52:55,]
+
+WR_MPA_T<- st_transform(WR_MPA, crs=27700)
+
+
+WR_MPA_T[1,6]
+WR_MPA_T[2,6]
+WR_MPA_T[3,6]
+WR_MPA_T[4,6]
+
+
+```
+
+
+
+
+### required functions
+```{r}
+
+
+
+prec<- function(sd) 1 / (sd^2)
+prec(20)
+
+sig<- function(pre) sqrt(1/pre)
+sig(0.0025)
+
+
+
+logistic <- function(x) 1 / (1 + exp(-x))
+logistic(10)
+
+
+
+my.logit <- function(p) {
+  if (any(p <= 0 | p >= 1)) {
+    stop("Input probabilities must be between 0 and 1 (exclusive).")
+  }
+  log(p / (1 - p))
+}
+
+col.mu<- colorRampPalette(brewer.pal(9, 'Purples')[2:9])
+col.sd2<- colorRampPalette(brewer.pal(9, 'BuGn')[1:9])
+
+
+```
+
+
+
+#INLA
+## SPDE mesh for Eribol
+```{r}
+
+LOC<- st_as_sfc(dat.erT)
+
+############## look at spatial nature of sampling locations
+head(LOC)
+
+st_coordinates(LOC)
+
+coords.X  <- st_coordinates(LOC)[,1] / 1000
+coords.Y <-  st_coordinates(LOC)[,2] / 1000
+
+coords <- cbind(coords.X, coords.Y)
+coords.er <- cbind(coords.X, coords.Y)
+
+head(coords)
+D <- dist(coords)
+par(mfrow = c(1,2), mar = c(5,5,2,2), cex.lab = 1.5)
+hist(D, 
+     freq = TRUE,
+     main = "", 
+     xlab = "Distance between sites (km)",
+     ylab = "Frequency")
+
+plot(x = sort(D), 
+     y = (1:length(D))/length(D), 
+     type = "l",
+     xlab = "Distance between sites (km)",
+     ylab = "Cumulative proportion")
+
+par(mfrow = c(1,1), mar = c(5,5,2,2), cex.lab = 1.5)
+
+## make mesh
+
+
+#alternative - use a 
+bound.er<- inla.nonconvex.hull(coords, convex= 0.5, concave= 0.5, resolution = 70)
+plot(bound.er)
+points(coords, col = 2, pch = 16, cex = 1)
+
+mesh.2.er<- fmesher::fm_mesh_2d_inla(boundary = bound.er, max.edge = c(0.4,1), offset = c(1,0.5))
+
+plot(mesh.2.er)
+mesh.2.er$n
+points(coords, col = 2, pch = 16, cex = 1)
+
+### weighting factors
+
+A1.er<- inla.spde.make.A(mesh.2.er, loc=coords)
+dim(A1.er)
+
+
+plot(mesh.2.er)
+mesh.2.er$n
+points(coords, col = 2, pch = 16, cex = 0.8)
+
+
+```
+
+
+
+## SPDE mesh for Wester Ross
+```{r}
+
+
+shark.wr<- subset(dat, dat$Location=='WR')
+
+
+
+dat.wr<- st_as_sf(shark.wr,coords =c(3,4), crs= 4326)
+
+
+
+dat.wrT<- st_transform(dat.wr, crs=27700)
+
+LOC<- st_as_sfc(dat.wrT)
+
+############## look at spatial nature of sampling locations
+
+st_coordinates(LOC)
+
+coords.X  <- st_coordinates(LOC)[,1] / 1000
+coords.Y <-  st_coordinates(LOC)[,2] / 1000
+
+coords <- cbind(coords.X, coords.Y)
+coords.wr <- cbind(coords.X, coords.Y)
+
+head(coords)
+D <- dist(coords)
+par(mfrow = c(1,2), mar = c(5,5,2,2), cex.lab = 1.5)
+hist(D, 
+     freq = TRUE,
+     main = "", 
+     xlab = "Distance between sites (km)",
+     ylab = "Frequency")
+
+plot(x = sort(D), 
+     y = (1:length(D))/length(D), 
+     type = "l",
+     xlab = "Distance between sites (km)",
+     ylab = "Cumulative proportion")
+
+par(mfrow = c(1,1), mar = c(5,5,2,2), cex.lab = 1.5)
+
+
+## make mesh
+
+bound.wr<- inla.nonconvex.hull(coords, convex= 0.5, concave= 0.5, resolution = 70)
+plot(bound.wr)
+points(coords, col = 2, pch = 16, cex = 1)
+
+
+mesh.3.wr<- inla.mesh.2d(boundary = bound.wr, max.edge = c(0.4,1), offset = c(1,0.5))
+plot(mesh.3.wr, asp=1)
+points(coords, col = 2, pch = 16, cex = 1)
+
+mesh.3.wr$n
+
+
+### weighting factors
+
+A1.wr<- inla.spde.make.A(mesh.3.wr, loc=coords)
+dim(A1.wr)
+
+
+
+
+mesh.3.wr<- inla.mesh.2d(boundary = bound.wr, max.edge = c(0.4,1), offset = c(1,0.5))
+plot(mesh.3.wr, asp=1)
+points(coords, col = 2, pch = 16, cex = 0.8)
+
+
+
+
+
+
+```
+
+
+
+## INLA-SPDE WRoss Dogfish - model selection
+```{r}
+
+## random intercept with spatial correlation
+
+spde <- inla.spde2.matern(mesh.3.wr, alpha = 2)
+
+
+## define spatial field
+
+w.index<- inla.spde.make.index(name='w', n.spde = spde$n.spde, n.group = 1, n.repl = 1)
+str(w.index)
+## define stack for inla
+
+# start with model covariates
+met.dat.SWR.T$Substratum1<- as.factor(met.dat.SWR.T$Substratum1)
+met.dat.SWR.T$Year<- as.factor(met.dat.SWR.T$Year)
+
+levels(met.dat.SWR.T$Substratum1)
+levels(met.dat.SWR.T$Year)
+
+
+
+head(met.dat.SWR.T)
+str(met.dat.SWR.T)
+
+dat.WRXm<- model.matrix( ~  -1+ depth +  Substratum1 + Year+ 
+                             depth:Substratum1 + depth:Year +
+                             Substratum1:Year,
+                         data=met.dat.SWR.T) 
+colnames(dat.WRXm)
+
+X<- data.frame(depth                       = dat.WRXm[,1],
+              Substratum1cob_boulder       = dat.WRXm[,2],
+              Substratum1gravel            = dat.WRXm[,3],
+              Substratum1mud               = dat.WRXm[,4],
+              Substratum1muddy_sand        = dat.WRXm[,5],
+              Substratum1rock              = dat.WRXm[,6],
+              Substratum1sand              = dat.WRXm[,7],
+              Year2023                     = dat.WRXm[,8],
+              depth.Substratum1gravel      = dat.WRXm[,9],
+              depth.Substratum1mud         = dat.WRXm[,10],
+              depth.Substratum1muddy_sand  = dat.WRXm[,11],
+              depth.Substratum1rock        = dat.WRXm[,12],
+              depth.Substratum1sand        = dat.WRXm[,13], 
+              depth.Year2023               = dat.WRXm[,14],
+              Substratum1gravel.Year2023   = dat.WRXm[,15],
+              Substratum1mud.Year2023      = dat.WRXm[,16],
+              Substratum1muddy_sand.Year2023  = dat.WRXm[,17],
+              Substratum1rock.Year2023     = dat.WRXm[,18],
+              Substratum1sand.Year2023     = dat.WRXm[,19])
+
+
+
+
+N <- nrow(dat.WRXm)
+
+
+y.df<- dat.wrT$pres.ab.Dogfis
+
+
+StackFit.WR<- inla.stack(
+                      tag= 'Fit',
+                      data=list(y=y.df),
+                      A = list(1, 1, A1.wr),
+                      effects = list(
+                        Intercept = rep(1,N),
+                        X=X,
+                        W = w.index))
+
+
+# define formula for spatial model
+
+f1<- y ~ -1 + Intercept + depth + Substratum1cob_boulder  +  
+              Substratum1gravel            +
+              Substratum1mud               +
+              Substratum1muddy_sand       +
+              Substratum1rock             +
+              Substratum1sand + 
+              Year2023+
+              depth.Substratum1gravel   +   
+              depth.Substratum1mud        + 
+              depth.Substratum1muddy_sand  +
+              depth.Substratum1rock       +
+              depth.Substratum1sand  + 
+              depth.Year2023  +           
+              Substratum1gravel.Year2023   +
+              Substratum1mud.Year2023     +
+              Substratum1muddy_sand.Year2023 +
+              Substratum1rock.Year2023     +
+              Substratum1sand.Year2023 + f(w, model = spde)# full model
+  
+f2<- y ~ -1 + Intercept + depth + Substratum1cob_boulder  +  
+              Substratum1gravel            +
+              Substratum1mud               +
+              Substratum1muddy_sand       +
+              Substratum1rock             +
+              Substratum1sand + 
+              Year2023+
+              depth.Substratum1gravel   +   
+              depth.Substratum1mud        + 
+              depth.Substratum1muddy_sand  +
+              depth.Substratum1rock       +
+              depth.Substratum1sand  + 
+              depth.Year2023  +           
+               f(w, model = spde)# remove substratum :year?
+
+
+IM1<- inla(f1,
+           family = 'binomial',
+           data= inla.stack.data(StackFit.WR),
+           control.compute = list(
+               dic=TRUE,
+               waic=TRUE),
+           control.predictor = list(
+               A = inla.stack.A(StackFit.WR)))
+
+
+
+IM2<- inla(f2,
+           family = 'binomial',
+           data= inla.stack.data(StackFit.WR),
+           control.compute = list(
+               dic=TRUE,
+               waic=TRUE),
+           control.predictor = list(
+               A = inla.stack.A(StackFit.WR)))
+
+
+
+c(IM1$dic$dic, IM2$dic$dic)
+c(IM1$waic$waic, IM2$waic$waic) ## IM2 better so drop substratum:year interaction
+
+f3<- y ~ -1 + Intercept + depth + Substratum1cob_boulder  +  
+              Substratum1gravel            +
+              Substratum1mud               +
+              Substratum1muddy_sand       +
+              Substratum1rock             +
+              Substratum1sand + 
+              Year2023+
+              depth.Substratum1gravel   +   
+              depth.Substratum1mud        + 
+              depth.Substratum1muddy_sand  +
+              depth.Substratum1rock       +
+              depth.Substratum1sand  + 
+                    
+               f(w, model = spde) 
+                # drop depth:year?
+
+
+  
+IM3<- inla(f3,
+           family = 'binomial',
+           data= inla.stack.data(StackFit.WR),
+           control.compute = list(
+               dic=TRUE,
+               waic=TRUE),
+           control.predictor = list(
+               A = inla.stack.A(StackFit.WR)))
+
+c(IM2$dic$dic, IM3$dic$dic)
+c(IM2$waic$waic, IM3$waic$waic) ## better without depth :year interaction
+  
+
+ f4<- y ~ -1 + Intercept + depth + Substratum1cob_boulder  +  
+              Substratum1gravel            +
+              Substratum1mud               +
+              Substratum1muddy_sand       +
+              Substratum1rock             +
+              Substratum1sand + 
+              Year2023+
+              
+               f(w, model = spde)  
+                # drop depth:substatum?
+                
+ 
+ IM4<- inla(f4,
+           family = 'binomial',
+           data= inla.stack.data(StackFit.WR),
+           control.compute = list(
+               dic=TRUE,
+               waic=TRUE),
+           control.predictor = list(
+               A = inla.stack.A(StackFit.WR)))    
+ 
+ 
+ c(IM3$dic$dic, IM4$dic$dic) 
+c(IM3$waic$waic, IM4$waic$waic) # better without depth:substratum interaction
+ 
+ f5<- y ~ -1 + Intercept +  Substratum1cob_boulder  +  
+              Substratum1gravel            +
+              Substratum1mud               +
+              Substratum1muddy_sand       +
+              Substratum1rock             +
+              Substratum1sand + 
+              Year2023+
+              
+               f(w, model = spde)  
+                # with spatial element and drop depth?
+                
+ 
+ 
+
+ IM5<- inla(f5,
+           family = 'binomial',
+           data= inla.stack.data(StackFit.WR),
+           control.compute = list(
+               dic=TRUE,
+               waic=TRUE),
+           control.predictor = list(
+               A = inla.stack.A(StackFit.WR)))   
+
+ c( IM4$dic$dic, IM5$dic$dic)
+ c( IM4$waic$waic, IM5$waic$waic) # better without depth
+ 
+f6<- y ~ -1 + Intercept +  
+              Year2023+
+              
+               f(w, model = spde)  
+                # with spatial element and drop substratum?
+                
+ 
+ 
+
+ IM6<- inla(f6,
+           family = 'binomial',
+           data= inla.stack.data(StackFit.WR),
+           control.compute = list(
+               dic=TRUE,
+               waic=TRUE),
+           control.predictor = list(
+               A = inla.stack.A(StackFit.WR)))   
+
+ c( IM5$dic$dic, IM6$dic$dic)
+ c( IM5$waic$waic, IM6$waic$waic)## better with substratum
+ 
+ f7<- y ~ -1 + Intercept +  Substratum1cob_boulder  +  
+              Substratum1gravel            +
+              Substratum1mud               +
+              Substratum1muddy_sand       +
+              Substratum1rock             +
+              Substratum1sand + 
+              
+              
+               f(w, model = spde)  
+                # with spatial element and drop year?
+                
+ 
+ 
+
+ IM7<- inla(f7,
+           family = 'binomial',
+           data= inla.stack.data(StackFit.WR),
+           control.compute = list(
+               dic=TRUE,
+               waic=TRUE),
+           control.predictor = list(
+               A = inla.stack.A(StackFit.WR)))   
+
+ c( IM5$dic$dic, IM7$dic$dic)
+ c( IM5$waic$waic, IM7$waic$waic) # better with year
+ 
+ 
+############# optimal model is model 5 ########################## 
+ 
+ ## model validation
+
+Fit5<- IM5$summary.fitted.values[1:210, 'mean']
+
+FitIndex<- inla.stack.index(StackFit.WR,
+                            tag= "Fit")$data
+
+Fit5<- IM5$summary.fitted.values[FitIndex, 'mean']
+
+##calculate residuals
+
+E5<- y.df- Fit5
+
+
+
+plot(Fit5,E5)
+
+plot(met.dat.SWR.T$depth, E5)
+
+
+
+
+```
+
+### Prior predictive simulation
+
+
+```{r}
+
+
+f5<- y ~ -1 + Intercept +  Substratum1cob_boulder  +  
+              Substratum1gravel            +
+              Substratum1mud               +
+              Substratum1muddy_sand       +
+              Substratum1rock             +
+              Substratum1sand + 
+              Year2023+
+              
+               f(w, model = spde)  ######### try prior specification here
+
+
+IM5<- inla(f5,
+           family = 'binomial',
+           data= inla.stack.data(StackFit.WR),
+           control.compute = list(
+               dic=TRUE,
+               waic=TRUE),
+           control.predictor = list(
+               A = inla.stack.A(StackFit.WR)))  
+
+inla.set.control.fixed.default(IM5)
+
+ 
+## model interpretation
+
+out5<- IM5$summary.fixed
+
+#### sum to calculate precision from s.d.
+sigma= 20#sd
+1 / (sigma^2)
+
+prec = 0.001
+sqrt(1/prec)
+
+
+
+prec<- function(sd) 1 / (sd^2)
+
+
+sig<- function(pre) sqrt(1/pre)
+
+
+# Assuming logistic() = inverse logit is defined as:
+
+
+logistic <- function(x) 1 / (1 + exp(-x))
+logistic(10)
+
+
+
+
+my.logit <- function(p) {
+  if (any(p <= 0 | p >= 1)) {
+    stop("Input probabilities must be between 0 and 1 (exclusive).")
+  }
+  log(p / (1 - p))
+}
+
+my.logit(0.00001)
+
+
+
+# prior sim
+
+# default priors
+mean = 0
+sd = sig(0.001)
+
+mean.inter = 0
+sd.inter= sig(0.000000001)
+
+sims=1000
+outD<- out5
+outD[1,1]<- mean.inter
+outD[1,2]<- sd.inter
+outD[c(2:8),1]<- mean
+outD[c(2:8),2]<- sd
+
+# Define the number of seabed types and years
+n_seabed <- 6
+offset <- 0.2  # Offset for year 2 points
+# Prepare plotting parameters
+plot(NA, ylim = c(-0.1, 1.1), xlim = c(0.5, 6.5), 
+     ylab = 'Probability of presence', 
+     xlab = 'Substratum', 
+     yaxt = 'n', xaxt = 'n')
+axis(1, at = 1:6, labels = levels(met.dat.SWR.T$Substratum1))
+axis(2, at = c(0, 0.5, 1), labels = c(0, 0.5, 1), las = 2)
+
+
+# Function to draw logistic regression error bounds
+##2022
+ for (i in 1:6){
+  
+  # Draw multiple points based on parameter uncertainties
+  for (j in 1:sims) {
+    # Sample intercept and slope from their distributions
+    sampled_intercept <- rnorm(1, mean = outD[1,1], sd = outD[1,2])
+    sampled_slope <- rnorm(1, mean = outD[i+1,1], sd = outD[i+1,2])
+   points( jitter(i, amount=0.1), logistic(sampled_intercept + sampled_slope), col = adjustcolor('black', alpha.f=0.5), pch=19, cex=0.7)
+  }
+   
+ 
+ } 
+
+##2023
+ for (i in 1:6){
+  
+  # Draw multiple curves based on parameter uncertainties
+  for (j in 1:sims) {
+    # Sample intercept and slope from their distributions
+    sampled_intercept <- rnorm(1, mean = outD[1,1], sd = outD[1,2])
+    sampled_slope <- rnorm(1, mean = outD[i+1,1] + outD[8,1], sd = outD[i+1,2]  + outD[8,2] )
+   points( jitter(i+0.2,amount=0.1), logistic(sampled_intercept + sampled_slope),   col = adjustcolor('grey60', alpha.f=0.5), pch=19, cex=0.7)
+  }
+   
+ 
+ } 
+
+# tradition "flat normal"
+ mean = 0  # Prior mean for all fixed effects
+prec = 10 # precision for prior = 
+
+################################################# My Priors
+
+
+  mean_inter=0
+  sd_inter = 0.1
+  mean = 0  # Prior mean for all fixed effects ---- here if we move to say -0.5 then it reduces the mean below 0 assuming less than 50% probability of seeing one
+ sd = 1 # SD for prior
+  mean_23 = 0
+ sd_23 = 0.1
+
+
+outP<- out5
+outP[1,1]<- mean_inter
+outP[1,2]<- sd_inter
+outP[c(2:7),1]<- mean
+outP[c(2:7),2]<- sd
+outP[8,1]<-mean_23
+outP[8,2]<- sd_23
+outP
+# Define the number of seabed types and years
+n_seabed <- 6
+offset <- 0.2  # Offset for year 2 points
+# Prepare plotting parameters
+plot(NA, ylim = c(-0.1, 1.1), xlim = c(0.5, 6.5), 
+     ylab = 'Probability of presence', 
+     xlab = 'Substratum', 
+     yaxt = 'n', xaxt = 'n')
+axis(1, at = 1:6, labels = levels(met.dat.SWR.T$Substratum1))
+axis(2, at = c(0, 0.5, 1), labels = c(0, 0.5, 1), las = 2)
+
+sims=200
+# Function to draw logistic regression error bounds
+##2022
+ for (i in 1:6){
+  
+  # Draw multiple points based on parameter uncertainties
+  for (j in 1:sims) {
+    # Sample intercept and slope from their distributions
+    sampled_intercept <- rnorm(1, mean = outP[1,1], sd = outP[1,2])
+    sampled_slope <- rnorm(1, mean = outP[i+1,1], sd = outP[i+1,2])
+   points( jitter(i, amount=0.1), logistic(sampled_intercept + sampled_slope), col = adjustcolor('seagreen', alpha.f=0.5), pch=19, cex=0.7)
+  }
+   
+ 
+ } 
+
+##2023
+ for (i in 1:6){
+  
+  # Draw multiple curves based on parameter uncertainties
+  for (j in 1:sims) {
+    # Sample intercept and slope from their distributions
+    sampled_intercept <- rnorm(1, mean = outP[1,1], sd = outP[1,2])
+    sampled_slope <- rnorm(1, mean = outP[i+1,1] + outP[8,1], sd = outP[i+1,2]  + outP[8,2] )
+   points( jitter(i+0.2,amount=0.1), logistic(sampled_intercept + sampled_slope),   col = adjustcolor('darkseagreen', alpha.f=0.5), pch=19, cex=0.7)
+  }
+   
+ 
+ } 
+
+outP
+
+```
+
+### Prediction
+```{r}
+# 
+
+
+
+N<- nrow(dat.WRXm)
+X<- data.frame(Intercept                      = rep(1, N),
+              Substratum1cob_boulder       = dat.WRXm[,2],
+              Substratum1gravel            = dat.WRXm[,3],
+              Substratum1mud               = dat.WRXm[,4],
+              Substratum1muddy_sand        = dat.WRXm[,5],
+              Substratum1rock              = dat.WRXm[,6],
+              Substratum1sand              = dat.WRXm[,7],
+              Year2023                     = dat.WRXm[,8])
+
+
+
+f5<- y ~ -1 + Intercept +  Substratum1cob_boulder  +  
+              Substratum1gravel            +
+              Substratum1mud               +
+              Substratum1muddy_sand       +
+              Substratum1rock             +
+              Substratum1sand + 
+              Year2023+
+              
+               f(w, model = spde)  ######### try prior specification here
+
+
+ mean_inter= 0
+  sd_inter = 0.1
+  mean = 0  # Prior mean for all fixed effects ---- here if we move to say -0.5 then it reduces the mean below 0 assuming less than 50% probability of seeing one
+ sd = 1 # SD for prior
+  mean_23 = 0
+ sd_23 = 0.1     
+      
+ IMp<- inla(f5,
+           family = 'binomial',
+           data= inla.stack.data(StackFit.WR),
+           control.compute = list(config= TRUE),
+           control.predictor = list(
+               A = inla.stack.A(StackFit.WR)),
+           control.fixed = list(
+            mean = 0,  # Prior mean for all fixed effects
+            prec = list(Intercept = prec(0.1) , default=prec(1), Year2023=prec(0.1) ) # Prior precision (1 / variance)
+           ))
+
+## model interpretation
+
+out5<- IMp$summary.fixed
+
+print(out5, digits=2)
+
+
+
+# Assuming logistic() is defined as:
+logistic <- function(x) 1 / (1 + exp(-x))
+
+# Prepare plotting parameters
+plot(NA, ylim = c(-0.1, 1.1), xlim = c(0.5, 6.5), 
+     ylab = 'Probability of presence', 
+     xlab = 'Substratum', 
+     yaxt = 'n', xaxt = 'n')
+axis(1, at = 1:6, labels = levels(met.dat.SWR.T$Substratum1))
+axis(2, at = c(0, 0.5, 1), labels = c(0, 0.5, 1), las = 2)
+
+# Define the number of seabed types and years
+n_seabed <- 6
+offset <- 0.2  # Offset for year 2 points
+
+# Loop through seabed types
+for (i in 1:n_seabed) {
+  # Compute means and error bounds for year 1
+  mean1 <- logistic(out5[1, 1] + out5[i + 1, 1])
+  lower1 <- logistic(out5[1, 3] + out5[i + 1, 3])
+  upper1 <- logistic(out5[1, 5] + out5[i + 1, 5])
+  
+  # Plot point and error bars for year 1
+  points(i, mean1, pch = 19, cex = 2.5)
+  arrows(i, lower1, i, upper1, angle = 90, length = 0.1, lwd = 2, code = 3)
+  
+  # Compute means and error bounds for year 2
+  mean2 <- logistic(out5[1, 1] + out5[i + 1, 1] + out5[8, 1])
+  lower2 <- logistic(out5[1, 3] + out5[i + 1, 3] + out5[8, 3])
+  upper2 <- logistic(out5[1, 5] + out5[i + 1, 5] + out5[8, 5])
+  
+  # Plot point and error bars for year 2
+  points(i + offset, mean2, pch = 19, cex = 2.5, col = 'grey60')
+  arrows(i + offset, lower2, i + offset, upper2, angle = 90, length = 0.1, lwd = 2.5, code = 3, col = 'grey60')
+}
+
+
+
+# Function to draw logistic regression error bounds
+samps=100
+ for (i in 1:6){
+  
+  # Draw multiple points based on parameter uncertainties
+  for (j in 1:samps) {
+    # Sample intercept and slope from their distributions
+    sampled_intercept <- rnorm(1, mean = out5[1,1], sd = out5[1,2])
+    sampled_slope <- rnorm(1, mean = out5[i+1,1], sd = out5[i+1,2])
+   points( jitter(i, amount=0.1), logistic(sampled_intercept + sampled_slope), col = adjustcolor('black', alpha.f=0.5), pch=19, cex=0.7)
+  }
+   
+ 
+ } 
+
+
+samps=100
+ for (i in 1:6){
+  
+  # Draw multiple curves based on parameter uncertainties
+  for (j in 1:samps) {
+    # Sample intercept and slope from their distributions
+    sampled_intercept <- rnorm(1, mean = out5[1,1], sd = out5[1,2])
+    sampled_slope <- rnorm(1, mean = out5[i+1,1] + out5[8,1], sd = out5[i+1,2]  + out5[8,2] )
+   points( jitter(i+0.2,amount=0.1), logistic(sampled_intercept + sampled_slope),   col = adjustcolor('grey60', alpha.f=0.5), pch=19, cex=0.7)
+  }
+   
+ 
+ } 
+
+
+
+# 
+# 
+ Sim<- inla.posterior.sample(n=1, result= IMp)
+
+ names(Sim[[1]])
+ Sim[[1]]$latent
+ Sim[[1]]$hyperpar
+ Sim[[1]]$logdens
+ length(Sim[[1]]$latent)
+
+ 
+
+ row.names(Sim[[1]]$latent)[3367:3374]
+ dim(Sim[[1]]$latent)
+# 
+ Sim[[1]]$latent[3367:3374,]
+
+
+ rownum<- as.numeric(c(3367:3374))
+ 
+ Sim[[1]]$latent[c(3365,3366),]
+ 
+ Betas <- Sim[[1]]$latent[rownum]
+
+ Sim[[1]]$latent[3366,]
+Sim[[1]]$latent[1364,]
+ wk<- Sim[[1]]$latent[1364:3366,]
+ 
+ head(X)
+ Xm <- as.matrix(X)
+ 
+ Am <- as.matrix(A1.wr)
+
+
+ FixedPart   <- Xm %*% Betas
+ SpatialPart <- Am %*% wk
+# 
+# 
+ mu   <- logistic(FixedPart + SpatialPart)
+
+ Ysim <- rbinom(n = N, size=1, prob =   mu)
+ Ysim
+
+ head(dat.wr)
+ new<- cbind(met.dat.wr, Ysim, dat.wr$pres.ab.Dogfish)
+ head(new)
+ names(new)[14]<- 'truth'
+ 
+ 
+ new$Substratum1<- as.factor(new$Substratum1)
+ new22<- subset(new, new$Year=='2022')
+new23<- subset(new, new$Year=='2023')
+ 
+
+ 
+points(jitter(as.numeric(new22$Substratum1)-0.1, amount= 0.1), jitter(new22$truth, amount =0.05) , pch=19, cex=0.8, col='firebrick4')
+   
+points(jitter(as.numeric(new23$Substratum1)+0.4, amount = 0.1), jitter(new23$truth, amount =0.05) , pch=19, cex=0.8, col='firebrick1')
+
+
+ points(jitter(as.numeric(new22$Substratum1)-0.1, amount= 0.1), jitter(new22$Ysim, amount =0.05), pch=19, cex=0.8, col='cadetblue4')
+   
+ points(jitter(as.numeric(new23$Substratum1)+0.4, amount=0.1), jitter(new23$Ysim, amount =0.05), pch=19, cex=0.8, col='cadetblue1')
+
+########################################### show random field for spatial ##########
+
+# Plot the spatial random field
+# Get the posterior mean of the spatial field at the mesh points:
+w.pm <- logistic(IMp$summary.random$w$mean)  
+w.sd <- logistic(IMp$summary.random$w$sd)
+length(w.pm)  #mu.srf
+# This is the spatial field calculated at all the mesh points
+hist(w.pm)
+
+# Now we calculate the spatial field on a grid. 
+wproj <- inla.mesh.projector(mesh.3.wr, dims=c(1000,1000))   
+
+
+
+
+#####################################
+# Plot the spatial random field
+
+w.pm100_100 <- inla.mesh.project(wproj, w.pm)
+w.sd100_100 <- inla.mesh.project(wproj, w.sd)
+
+
+Grid <- expand.grid(Xkm = wproj$x, 
+                    Ykm = wproj$y)
+Grid$w.pm <- as.vector(w.pm100_100)     
+Grid$w.sd <- as.vector(w.sd100_100)               
+
+col.r <- rev(rainbow(30, alpha = 0.35))
+u.proj <-  inla.mesh.projector(mesh.3.wr, loc= coords.wr)
+u.mean<- inla.mesh.project(u.proj, IMp$summary.random$w$mean)
+
+
+
+
+wr.coast<- data.frame(st_coordinates(shore.wr)[,1:2]/1000)
+
+
+levelplot(w.pm ~ Xkm * Ykm,add=T,
+          col.regions = col.r,
+          data = Grid, 
+          scales = list(draw = TRUE),
+          xlab = list("X-coordinates (km)", cex = 1.5),
+          ylab = list("Y-coordinates (km)", cex = 1.5),
+          main = list("Posterior mean spatial random field", cex = 1.5),
+          panel = function(...) {
+            panel.levelplot(...)  # Default levelplot
+            panel.points(wr.coast[,1], wr.coast[,2], pch = 16, col = "black", cex = 0.2)
+            panel.points(coords.wr[,1], coords.wr[,2], pch = 19, col = "black", cex = 0.5)  # Add points  # Add points
+          })
+
+
+
+levelplot(w.sd ~ Xkm * Ykm,
+          col.regions = col.r,
+          data = Grid, 
+          scales = list(draw = TRUE),
+          xlab = list("X-coordinates (km)", cex = 1.5),
+          ylab = list("Y-coordinates (km)", cex = 1.5),
+          main = list("Posterior sd spatial random field", cex = 1.5),
+          panel = function(...) {
+            panel.levelplot(...)  # Default levelplot
+            panel.points(wr.coast[,1], wr.coast[,2], pch = 16, col = "black", cex = 0.2)
+            panel.points(coords.wr[,1], coords.wr[,2], pch = 19, col = "black", cex = 0.5)  # Add points  # Add points
+          }) 
+ 
+ 
+
+
+
+
+
+
+```
+
+
+## INLA-SPDE approach Eriboll dogfish - model selection
+```{r}
+
+
+
+## random intercept with spatial correlation
+
+spde <- inla.spde2.matern(mesh.2.er, alpha = 2)
+
+
+## define spatial field
+
+w.index<- inla.spde.make.index(name='w', n.spde = spde$n.spde, n.group = 1, n.repl = 1)
+
+## define stack
+
+# start with model covariates
+met.dat.Ser.T$Substratum1<- as.factor(met.dat.Ser.T$Substratum1)
+
+
+met.dat.Ser.T$Year<- as.factor(met.dat.Ser.T$Year)
+
+
+dat.ERXm<- model.matrix( ~  -1+ depth +  Substratum1 + Year+ 
+                             depth:Substratum1 + depth:Year +
+                             Substratum1:Year,
+                         data=met.dat.Ser.T) 
+colnames(dat.ERXm)
+
+
+
+X<- data.frame(depth                       = dat.ERXm[,1],
+              Substratum1cob_boulder       = dat.ERXm[,2],
+              Substratum1gravel            = dat.ERXm[,3],
+              Substratum1mud               = dat.ERXm[,4],
+              Substratum1muddy_sand        = dat.ERXm[,5],
+              Substratum1rock              = dat.ERXm[,6],
+              Substratum1sand              = dat.ERXm[,7],
+              Year2022                     = dat.ERXm[,8],
+              Year2023                     = dat.ERXm[,9],
+              depth.Substratum1gravel      = dat.ERXm[,10],
+              depth.Substratum1mud         = dat.ERXm[,11],
+              depth.Substratum1muddy_sand  = dat.ERXm[,12],
+              depth.Substratum1rock        = dat.ERXm[,13],
+              depth.Substratum1sand        = dat.ERXm[,14], 
+              depth.Year2022               = dat.ERXm[,15],
+              depth.Year2023               = dat.ERXm[,16],
+              Substratum1gravel.Year2022   = dat.ERXm[,17],
+              Substratum1mud.Year2022      = dat.ERXm[,18],
+              Substratum1muddy_sand.Year2022  = dat.ERXm[,19],
+              Substratum1rock.Year2022    = dat.ERXm[,20],
+              Substratum1sand.Year2022     = dat.ERXm[,21],
+               Substratum1gravel.Year2023   = dat.ERXm[,22],
+              Substratum1mud.Year2023      = dat.ERXm[,23],
+              Substratum1muddy_sand.Year2023  = dat.ERXm[,24],
+              Substratum1rock.Year2023    = dat.ERXm[,25],
+              Substratum1sand.Year2023     = dat.ERXm[,26]    )
+
+
+N <- nrow(dat.ERXm)
+
+
+
+y.df<- dat.erT$pres.ab.Dogfis
+
+
+
+
+StackFit.ER<- inla.stack(
+                      tag= 'Fit',
+                      data=list(y=y.df),
+                      A = list(1, 1, A1.er),
+                      effects = list(
+                        Intercept = rep(1,N),
+                        X=X,
+                        W = w.index))
+
+
+# define formula for spatial model similar to above
+
+f1<- y ~ -1 + Intercept + 
+              depth                       +
+              Substratum1cob_boulder       +
+              Substratum1gravel            +
+              Substratum1mud               +
+              Substratum1muddy_sand       +
+              Substratum1rock             +
+              Substratum1sand             +
+              Year2022                    +
+              Year2023                    +
+              depth.Substratum1gravel     +
+              depth.Substratum1mud        +
+              depth.Substratum1muddy_sand  +
+              depth.Substratum1rock        +
+              depth.Substratum1sand        + 
+              depth.Year2022               +
+              depth.Year2023              +
+              Substratum1gravel.Year2022   +
+              Substratum1mud.Year2022      +
+              Substratum1muddy_sand.Year2022 +
+              Substratum1rock.Year2022    +
+              Substratum1sand.Year2022     +
+               Substratum1gravel.Year2023   +
+              Substratum1mud.Year2023     +
+              Substratum1muddy_sand.Year2023 +
+              Substratum1rock.Year2023    +
+              Substratum1sand.Year2023     +   f(w, model = spde)# with spatial element and all interactions
+  
+f2<- y ~ -1 + Intercept + 
+              depth                       +
+              Substratum1cob_boulder       +
+              Substratum1gravel            +
+              Substratum1mud               +
+              Substratum1muddy_sand       +
+              Substratum1rock             +
+              Substratum1sand             +
+              Year2022                    +
+              Year2023                    +
+              
+              depth.Year2022               +
+              depth.Year2023              +
+              Substratum1gravel.Year2022   +
+              Substratum1mud.Year2022      +
+              Substratum1muddy_sand.Year2022 +
+              Substratum1rock.Year2022    +
+              Substratum1sand.Year2022     +
+               Substratum1gravel.Year2023   +
+              Substratum1mud.Year2023     +
+              Substratum1muddy_sand.Year2023 +
+              Substratum1rock.Year2023    +
+              Substratum1sand.Year2023     +   f(w, model = spde)  # without depth:substratum
+
+
+
+
+
+IM1<- inla(f1,
+           family = 'binomial',
+           data= inla.stack.data(StackFit.ER),
+           control.compute = list(
+               dic=TRUE,
+               waic=TRUE),
+           control.predictor = list(
+               A = inla.stack.A(StackFit.ER)))
+
+IM2<- inla(f2,
+           family = 'binomial',
+           data= inla.stack.data(StackFit.ER),
+           control.compute = list(
+               dic=TRUE,
+               waic=TRUE),
+           control.predictor = list(
+               A = inla.stack.A(StackFit.ER)))
+
+
+c(IM1$dic$dic, IM2$dic$dic)
+c(IM1$waic$waic, IM2$waic$waic) ## better without depth:substratum
+
+
+f3<- y ~ -1 + Intercept + 
+              depth                       +
+              Substratum1cob_boulder       +
+              Substratum1gravel            +
+              Substratum1mud               +
+              Substratum1muddy_sand       +
+              Substratum1rock             +
+              Substratum1sand             +
+              Year2022                    +
+              Year2023                    +
+              
+             
+              Substratum1gravel.Year2022   +
+              Substratum1mud.Year2022      +
+              Substratum1muddy_sand.Year2022 +
+              Substratum1rock.Year2022    +
+              Substratum1sand.Year2022     +
+               Substratum1gravel.Year2023   +
+              Substratum1mud.Year2023     +
+              Substratum1muddy_sand.Year2023 +
+              Substratum1rock.Year2023    +
+              Substratum1sand.Year2023     +  
+                 f(w, model = spde) # remove depth:year
+
+
+
+
+IM3<- inla(f3,
+           family = 'binomial',
+           data= inla.stack.data(StackFit.ER),
+           control.compute = list(
+               dic=TRUE,
+               waic=TRUE),
+           control.predictor = list(
+               A = inla.stack.A(StackFit.ER)))
+
+c(IM2$dic$dic, IM3$dic$dic)
+c(IM2$waic$waic, IM3$waic$waic) ## so better without depth:year
+  
+
+
+ f4<- y ~ -1 +Intercept + 
+              
+              Substratum1cob_boulder       +
+              Substratum1gravel            +
+              Substratum1mud               +
+              Substratum1muddy_sand       +
+              Substratum1rock             +
+              Substratum1sand             +
+              Year2022                    +
+              Year2023                    +
+              
+             
+              Substratum1gravel.Year2022   +
+              Substratum1mud.Year2022      +
+              Substratum1muddy_sand.Year2022 +
+              Substratum1rock.Year2022    +
+              Substratum1sand.Year2022     +
+               Substratum1gravel.Year2023   +
+              Substratum1mud.Year2023     +
+              Substratum1muddy_sand.Year2023 +
+              Substratum1rock.Year2023    +
+              Substratum1sand.Year2023       + 
+              
+                 f(w, model = spde) # remove depth
+ 
+ IM4<- inla(f4,
+           family = 'binomial',
+           data= inla.stack.data(StackFit.ER),
+           control.compute = list(
+               dic=TRUE,
+               waic=TRUE),
+           control.predictor = list(
+               A = inla.stack.A(StackFit.ER)))    
+ 
+ 
+c(IM3$dic$dic, IM4$dic$dic)
+c(IM3$waic$waic, IM4$waic$waic) ##model 3 is better with depth
+
+
+
+f5<- y ~ -1 + Intercept + 
+              depth                       +
+              Substratum1cob_boulder       +
+              Substratum1gravel            +
+              Substratum1mud               +
+              Substratum1muddy_sand       +
+              Substratum1rock             +
+              Substratum1sand             +
+              Year2022                    +
+              Year2023                    +
+              
+             
+               
+                 f(w, model = spde) # remove substratum:year
+
+
+
+
+IM5<- inla(f5,
+           family = 'binomial',
+           data= inla.stack.data(StackFit.ER),
+           control.compute = list(
+               dic=TRUE,
+               waic=TRUE),
+           control.predictor = list(
+               A = inla.stack.A(StackFit.ER)))
+
+c(IM3$dic$dic, IM5$dic$dic)
+c(IM3$waic$waic, IM5$waic$waic) ## so better with substratum:year
+
+
+
+
+
+
+
+### model validation
+
+Fit3<- IM3$summary.fitted.values[1:210, 'mean']
+
+FitIndex<- inla.stack.index(StackFit.ER,
+                            tag= "Fit")$data
+
+Fit3<- IM3$summary.fitted.values[FitIndex, 'mean']
+
+##calculate residuals
+
+E3<- y.df- Fit3
+
+
+
+plot(Fit3,E3)
+
+plot(met.dat.Ser.T$depth, E3)
+
+
+
+
+```
+### Prior predictive simulation
+
+
+
+```{r}
+
+
+f3<- y ~ -1 + Intercept + 
+              depth                       +
+              Substratum1cob_boulder       +
+              Substratum1gravel            +
+              Substratum1mud               +
+              Substratum1muddy_sand       +
+              Substratum1rock             +
+              Substratum1sand             +
+              Year2022                    +
+              Year2023                    +
+              
+             
+              Substratum1gravel.Year2022   +
+              Substratum1mud.Year2022      +
+              Substratum1muddy_sand.Year2022 +
+              Substratum1rock.Year2022    +
+              Substratum1sand.Year2022     +
+               Substratum1gravel.Year2023   +
+              Substratum1mud.Year2023     +
+              Substratum1muddy_sand.Year2023 +
+              Substratum1rock.Year2023    +
+              Substratum1sand.Year2023     +  
+                 f(w, model = spde) 
+
+IM3<- inla(f3,
+           family = 'binomial',
+           data= inla.stack.data(StackFit.ER),
+                      control.predictor = list(
+               A = inla.stack.A(StackFit.ER)))
+
+
+inla.set.control.fixed.default(IM3)
+
+ 
+## model interpretation
+
+out3<- IM3$summary.fixed
+
+#### sum to calculate precision from s.d.
+sigma= 20#sd
+1 / (sigma^2)
+
+# Assuming logistic() is defined as:
+logistic <- function(x) 1 / (1 + exp(-x))
+
+
+
+out3
+# prior sim
+
+# default priors
+mean = 0
+prec = 0.001
+
+mean.inter = 0
+prec.inter= 0
+
+sims=1000
+outD<- out3
+outD[1,1]<- mean.inter
+outD[1,2]<- prec.inter
+outD[c(2:20),1]<- mean
+outD[c(2:20),2]<- prec
+
+
+
+##mean depth
+x.hat<- mean(met.dat.Ser.T$depth)
+x.hat<- -30
+################### some trial plots from these coefs 
+plot(NA, ylim=c(-0.1, 1.1), xlim=c(0.5,6.5), ylab='Probability of presence', xlab ='Substratum', yaxt='n', xaxt='n')
+axis(1, at= c(1,2,3,4,5,6), labels = levels(met.dat.Ser.T$Substratum1))
+axis(2, at= c(0,0.5, 1), labels = c(0,0.5, 1), las=2)
+# Assuming logistic() is defined as:
+logistic <- function(x) 1 / (1 + exp(-x))
+
+## 2021
+loc_2021 <- seq(1-0.2, 6-0.2, by = 1) # x-positions for substrata
+
+# Function to draw logistic regression error
+samps=100
+ for (i in 1:6){
+
+  # Draw multiple points based on parameter uncertainties
+  for (j in 1:samps) {
+    # Sample intercept and slope from their distributions
+    sampled_intercept <- rnorm(1, mean = outD[1,1], sd = outD[1,2])
+    sampled_seabed <- rnorm(1, mean = outD[i+2,1], sd = outD[i+2,2])
+    sampled_depth <- rnorm(1, mean = outD[2,1], sd = outD[2,2]) *x.hat
+   points( jitter(loc_2021[i], amount=0.1), logistic(sampled_intercept +       sampled_seabed + sampled_depth), col = adjustcolor('black', alpha.f=0.5), pch=19, cex=0.7)
+  }
+   
+ 
+ } 
+
+# Function to draw logistic regression error
+
+run<- 'one'
+inter_coef<- c(0, outD[11, 1], outD[12, 1], outD[13, 1], outD[14, 1], outD[15, 1])
+inter_coef_sd<- c(0, outD[11, 2], outD[12, 2], outD[13, 2], outD[14, 2], outD[15, 2])
+
+
+ for (i in 1:6){
+
+  # Draw multiple points based on parameter uncertainties
+  for (j in 1:samps) {
+    # Sample intercept and slope from their distributions
+    sampled_intercept <- rnorm(1, mean = outD[1,1], sd = outD[1,2])
+    sampled_seabed <- rnorm(1, mean = outD[i+2,1], sd = outD[i+2,2])
+    sampled_depth <- rnorm(1, mean = outD[2,1], sd = outD[2,2]) *x.hat
+    sampled_year <- rnorm(1, mean = outD[9,1], sd= outD[9,2])
+    sampled_interact <- rnorm(1, mean = inter_coef[i], inter_coef_sd[i])
+    if(run == 'one' ){
+   points( jitter(loc_2022[i], amount=0.1), logistic(sampled_intercept + sampled_seabed + sampled_depth + sampled_year), col = adjustcolor('grey60', alpha.f=0.5), pch=19, cex=0.7)
+    } else {
+      run <- 'next'
+      points( jitter(loc_2022[i], amount=0.1), logistic(sampled_intercept + sampled_seabed + sampled_depth + sampled_year + sampled_interact), col = adjustcolor('grey60', alpha.f=0.5), pch=19, cex=0.7)
+    }
+  
+ } }
+
+# Function to draw logistic regression error
+run<- 'one'
+inter_coef23<- c(0, outD[16, 1], outD[17, 1], outD[18, 1], outD[19, 1], outD[20, 1])
+inter_coef_sd23<- c(0, outD[16, 2], outD[17, 2], outD[18, 2], outD[19, 2], outD[20, 2])
+
+ for (i in 1:6){
+
+  # Draw multiple points based on parameter uncertainties
+  for (j in 1:samps) {
+    # Sample intercept and slope from their distributions
+    sampled_intercept <- rnorm(1, mean = outD[1,1], sd = outD[1,2])
+    sampled_seabed <- rnorm(1, mean = outD[i+2,1], sd = outD[i+2,2])
+    sampled_depth <- rnorm(1, mean = outD[2,1], sd = outD[2,2]) *x.hat
+    sampled_year <- rnorm(1, mean = outD[10,1], sd= outD[10,2])
+    sampled_interact <- rnorm(1, mean = inter_coef23[i], inter_coef_sd23[i])
+    if(run == 'one' ){
+   points( jitter(loc_2023[i], amount=0.1), logistic(sampled_intercept + sampled_seabed + sampled_depth + sampled_year), col = adjustcolor('grey80', alpha.f=0.5), pch=19, cex=0.7)
+    } else {
+      run <- 'next'
+      points( jitter(loc_2023[i], amount=0.1), logistic(sampled_intercept + sampled_seabed + sampled_depth + sampled_year + sampled_interact), col = adjustcolor('grey80', alpha.f=0.5), pch=19, cex=0.7)
+    }
+  
+ } }
+
+############################################################
+
+
+# tradition "flat normal"
+# mean = 0  # Prior mean for all fixed effects
+# prec = 10 # precision for prior
+
+######################################################## My priors ##############################
+
+
+mean_inter= 0
+  sd_inter = 0.1
+  mean = 0  # Prior mean for all fixed effects ---- here if we move to say -0.5 then it reduces the mean below 0 assuming less than 50% probability of seeing one
+ sd = 1 # SD for prior
+  mean_yr = 0
+ sd_year = 0.1   
+sd_depth=0.01
+
+
+sims=300
+outD<- out3
+outD[1,1]<- mean_inter
+outD[1,2]<- sd_inter
+outD[c(2:20),1]<- mean
+outD[c(2:20),2]<- sd
+outD[c(9:10),2]<- sd_year
+outD[2,2]<- sd_depth
+outD
+
+
+##mean depth
+x.hat<- mean(met.dat.Ser.T$depth)
+x.hat<- -30
+################### some trial plots from these coefs 
+plot(NA, ylim=c(-0.1, 1.1), xlim=c(0.5,6.5), ylab='Probability of presence', xlab ='Substratum', yaxt='n', xaxt='n')
+axis(1, at= c(1,2,3,4,5,6), labels = levels(met.dat.Ser.T$Substratum1))
+axis(2, at= c(0,0.5, 1), labels = c(0,0.5, 1), las=2)
+# Assuming logistic() is defined as:
+logistic <- function(x) 1 / (1 + exp(-x))
+
+## 2021
+loc_2021 <- seq(1-0.2, 6-0.2, by = 1) # x-positions for substrata
+
+# Function to draw logistic regression error
+
+ for (i in 1:6){
+
+  # Draw multiple points based on parameter uncertainties
+  for (j in 1:sims) {
+    # Sample intercept and slope from their distributions
+    sampled_intercept <- rnorm(1, mean = outD[1,1], sd = outD[1,2])
+    sampled_seabed <- rnorm(1, mean = outD[i+2,1], sd = outD[i+2,2])
+    sampled_depth <- rnorm(1, mean = outD[2,1], sd = outD[2,2]) *x.hat
+   points( jitter(loc_2021[i], amount=0.1), logistic(sampled_intercept +       sampled_seabed + sampled_depth), col = adjustcolor('seagreen', alpha.f=0.5), pch=19, cex=0.7)
+  }
+   
+ 
+ } 
+
+# Function to draw logistic regression error
+
+run<- 'one'
+inter_coef<- c(0, outD[11, 1], outD[12, 1], outD[13, 1], outD[14, 1], outD[15, 1])
+inter_coef_sd<- c(0, outD[11, 2], outD[12, 2], outD[13, 2], outD[14, 2], outD[15, 2])
+
+## 2022
+loc_2022 <- seq(1, 6, by = 1) # x-positions for substrata
+
+ for (i in 1:6){
+
+  # Draw multiple points based on parameter uncertainties
+  for (j in 1:sims) {
+    # Sample intercept and slope from their distributions
+    sampled_intercept <- rnorm(1, mean = outD[1,1], sd = outD[1,2])
+    sampled_seabed <- rnorm(1, mean = outD[i+2,1], sd = outD[i+2,2])
+    sampled_depth <- rnorm(1, mean = outD[2,1], sd = outD[2,2]) *x.hat
+    sampled_year <- rnorm(1, mean = outD[9,1], sd= outD[9,2])
+    sampled_interact <- rnorm(1, mean = inter_coef[i], inter_coef_sd[i])
+    if(run == 'one' ){
+   points( jitter(loc_2022[i], amount=0.1), logistic(sampled_intercept + sampled_seabed + sampled_depth + sampled_year), col = adjustcolor('mediumseagreen', alpha.f=0.5), pch=19, cex=0.7)
+    } else {
+      run <- 'next'
+      points( jitter(loc_2022[i], amount=0.1), logistic(sampled_intercept + sampled_seabed + sampled_depth + sampled_year + sampled_interact), col = adjustcolor('mediumseagreen', alpha.f=0.5), pch=19, cex=0.7)
+    }
+  
+ } }
+
+# Function to draw logistic regression error
+run<- 'one'
+inter_coef23<- c(0, outD[16, 1], outD[17, 1], outD[18, 1], outD[19, 1], outD[20, 1])
+inter_coef_sd23<- c(0, outD[16, 2], outD[17, 2], outD[18, 2], outD[19, 2], outD[20, 2])
+
+## 2023
+
+loc_2023 <- seq(1+0.2, 6+0.2, by = 1) # x-positions for substrata
+
+ for (i in 1:6){
+
+  # Draw multiple points based on parameter uncertainties
+  for (j in 1:sims) {
+    # Sample intercept and slope from their distributions
+    sampled_intercept <- rnorm(1, mean = outD[1,1], sd = outD[1,2])
+    sampled_seabed <- rnorm(1, mean = outD[i+2,1], sd = outD[i+2,2])
+    sampled_depth <- rnorm(1, mean = outD[2,1], sd = outD[2,2]) *x.hat
+    sampled_year <- rnorm(1, mean = outD[10,1], sd= outD[10,2])
+    sampled_interact <- rnorm(1, mean = inter_coef23[i], inter_coef_sd23[i])
+    if(run == 'one' ){
+   points( jitter(loc_2023[i], amount=0.1), logistic(sampled_intercept + sampled_seabed + sampled_depth + sampled_year), col = adjustcolor('darkseagreen', alpha.f=0.5), pch=19, cex=0.7)
+    } else {
+      run <- 'next'
+      points( jitter(loc_2023[i], amount=0.1), logistic(sampled_intercept + sampled_seabed + sampled_depth + sampled_year + sampled_interact), col = adjustcolor('darkseagreen', alpha.f=0.5), pch=19, cex=0.7)
+    }
+  
+ } }
+
+############################################################
+
+
+
+```
+
+
+###Prediction
+```{r}
+
+
+N<- nrow(dat.ERXm)
+X<- data.frame(Intercept                      = rep(1, N),
+              depth                       = dat.ERXm[,1],
+              Substratum1cob_boulder       = dat.ERXm[,2],
+              Substratum1gravel            = dat.ERXm[,3],
+              Substratum1mud               = dat.ERXm[,4],
+              Substratum1muddy_sand        = dat.ERXm[,5],
+              Substratum1rock              = dat.ERXm[,6],
+              Substratum1sand              = dat.ERXm[,7],
+              Year2022                     = dat.ERXm[,8],
+              Year2023                     = dat.ERXm[,9],
+              Substratum1gravel.Year2022   = dat.ERXm[,17],
+              Substratum1mud.Year2022      = dat.ERXm[,18],
+              Substratum1muddy_sand.Year2022  = dat.ERXm[,19],
+              Substratum1rock.Year2022    = dat.ERXm[,20],
+              Substratum1sand.Year2022     = dat.ERXm[,21],
+               Substratum1gravel.Year2023   = dat.ERXm[,22],
+              Substratum1mud.Year2023      = dat.ERXm[,23],
+              Substratum1muddy_sand.Year2023  = dat.ERXm[,24],
+              Substratum1rock.Year2023    = dat.ERXm[,25],
+              Substratum1sand.Year2023     = dat.ERXm[,26]   )
+
+
+
+
+f3<- y ~ -1 + Intercept + 
+              depth                       +
+              Substratum1cob_boulder       +
+              Substratum1gravel            +
+              Substratum1mud               +
+              Substratum1muddy_sand       +
+              Substratum1rock             +
+              Substratum1sand             +
+              Year2022                    +
+              Year2023                    +
+              Substratum1gravel.Year2022   +
+              Substratum1mud.Year2022      +
+              Substratum1muddy_sand.Year2022 +
+              Substratum1rock.Year2022    +
+              Substratum1sand.Year2022     +
+               Substratum1gravel.Year2023   +
+              Substratum1mud.Year2023     +
+              Substratum1muddy_sand.Year2023 +
+              Substratum1rock.Year2023    +
+              Substratum1sand.Year2023     +  
+                 f(w, model = spde) # remove depth:year
+
+# Priors from simulation
+mean_inter= 0
+  sd_inter = 0.1
+  mean = 0  # Prior mean for all fixed effects ---- here if we move to say -0.5 then it reduces the mean below 0 assuming less than 50% probability of seeing one
+ sd = 1 # SD for prior
+  mean_yr = 0
+ sd_year = 0.1   
+sd_depth=0.01
+
+
+
+IMp<- inla(f3,
+           family = 'binomial',
+           data= inla.stack.data(StackFit.ER),
+           control.compute = list(config= TRUE),
+           control.predictor = list(
+               A = inla.stack.A(StackFit.ER)),
+           control.fixed = list(
+            mean = 0,  # Prior mean for all fixed effects
+            prec = list(Intercept = prec(0.1), Substratum1cob_boulder = prec(1), Substratum1gravel= prec(1), Substratum1mud= prec(1), Substratum1muddy_sand = prec(1), Substratum1rock = prec(1), Substratum1sand = prec(1),
+                        default=prec(0.1), depth= prec(0.01) ) # Prior precision (1 / variance)
+           ))
+
+## model interpretation
+
+out3<- IMp$summary.fixed
+
+print(out3, digits=2)
+
+
+
+##########
+
+##mean depth
+x.hat<- mean(met.dat.Ser.T$depth)
+x.hat<- -20
+################### some trial plots from these coefs 
+plot(NA, ylim=c(-0.1, 1.1), xlim=c(0.5,6.5), ylab='Probability of presence', xlab ='Substratum', yaxt='n', xaxt='n')
+axis(1, at= c(1,2,3,4,5,6), labels = levels(met.dat.Ser.T$Substratum1))
+axis(2, at= c(0,0.5, 1), labels = c(0,0.5, 1), las=2)
+
+# Assuming logistic() is defined as:
+logistic <- function(x) 1 / (1 + exp(-x))
+
+## 2021
+loc_2021 <- seq(1-0.2, 6-0.2, by = 1) # x-positions for substrata
+
+
+for (i in 1:6){
+  
+points(loc_2021[i], logistic(out3[1,1]+ out3[i+2,1] + out3[2,1]*x.hat), pch=19, cex=2.5)
+arrows(loc_2021[i], logistic(out3[1,3]+out3[i+2,3] +out3[2,3]*x.hat), loc_2021[i], logistic(out3[1,5]+out3[i+2,5]+out3[2,5]*x.hat), angle=90, length=0.1, lwd=2.5, code=3)
+
+  
+}
+
+
+# Function to draw logistic regression error
+samps=100
+ for (i in 1:6){
+
+  # Draw multiple points based on parameter uncertainties
+  for (j in 1:samps) {
+    # Sample intercept and slope from their distributions
+    sampled_intercept <- rnorm(1, mean = out3[1,1], sd = out3[1,2])
+    sampled_seabed <- rnorm(1, mean = out3[i+2,1], sd = out3[i+2,2])
+    sampled_depth <- rnorm(1, mean = out3[2,1], sd = out3[2,2]) *x.hat
+   points( jitter(loc_2021[i], amount=0.1), logistic(sampled_intercept +   sampled_seabed + sampled_depth), col = adjustcolor('black', alpha.f=0.5), pch=19, cex=0.7)
+  }
+   
+ 
+ } 
+
+#########################################################################################
+## 2022
+loc_2022 <- seq(1, 6, by = 1) # x-positions for substrata
+
+
+points(loc_2022[1], logistic(out3[1,1] + out3[3,1]+ out3[9,1] +out3[2,1]*x.hat), pch=19, cex=2.5, col='grey50')
+arrows(loc_2022[1],logistic(out3[1,3]+out3[3,3]+ out3[9,3] +out3[2,3]*x.hat), loc_2022[1], logistic(out3[1,5]+out3[3,5]+ out3[9,5] +out3[2,5]*x.hat), angle=90, length=0.1, lwd=2.5, code=3, col='grey60')
+
+for (i in 2:6){
+
+points(loc_2022[i], logistic(out3[1,1]+ out3[i + 2,1] + out3[9,1]+ out3[i + 9,1] + out3[2,1]*x.hat), pch=19, cex=2.5, col='grey50')
+arrows(loc_2022[i],logistic(out3[1,3]+ out3[i+2, 3]+ out3[9,3]+ out3[i+9,3] + out3[2,3]*x.hat), loc_2022[i], logistic(out3[1,5]+out3[i+2,5]+ out3[9,5]+ out3[i+9,5] + out3[2,5]*x.hat), angle=90, length=0.1, lwd=2.5, code=3, col='grey60')
+
+  
+}
+
+
+# Function to draw logistic regression error
+
+run<- 'one'
+inter_coef<- c(0, out3[11, 1], out3[12, 1], out3[13, 1], out3[14, 1], out3[15, 1])
+inter_coef_sd<- c(0, out3[11, 2], out3[12, 2], out3[13, 2], out3[14, 2], out3[15, 2])
+
+
+ for (i in 1:6){
+
+  # Draw multiple points based on parameter uncertainties
+  for (j in 1:samps) {
+    # Sample intercept and slope from their distributions
+    sampled_intercept <- rnorm(1, mean = out3[1,1], sd = out3[1,2])
+    sampled_seabed <- rnorm(1, mean = out3[i+2,1], sd = out3[i+2,2])
+    sampled_depth <- rnorm(1, mean = out3[2,1], sd = out3[2,2]) *x.hat
+    sampled_year <- rnorm(1, mean = out3[9,1], sd= out3[9,2])
+    sampled_interact <- rnorm(1, mean = inter_coef[i], inter_coef_sd[i])
+    if(run == 'one' ){
+   points( jitter(loc_2022[i], amount=0.1), logistic(sampled_intercept + sampled_seabed + sampled_depth + sampled_year), col = adjustcolor('grey60', alpha.f=0.5), pch=19, cex=0.7)
+    } else {
+      run <- 'next'
+      points( jitter(loc_2022[i], amount=0.1), logistic(sampled_intercept + sampled_seabed + sampled_depth + sampled_year + sampled_interact), col = adjustcolor('grey60', alpha.f=0.5), pch=19, cex=0.7)
+    }
+  
+ } }
+
+#############################################################
+
+
+
+
+
+## 2023
+
+loc_2023 <- seq(1+0.2, 6+0.2, by = 1) # x-positions for substrata
+
+
+points(loc_2023[1], logistic(out3[1,1]+ out3[3,1]+ out3[10,1] +out3[2,1]*x.hat), pch=19, cex=2.5, col='grey80')
+arrows(loc_2023[1],logistic(out3[1,3]+out3[3,3]+ out3[10,3] +out3[2,3]*x.hat), loc_2023[1], logistic(out3[1,5]+out3[3,5]+ out3[10,5] +out3[2,5]*x.hat), angle=90, length=0.1, lwd=2.5, code=3, col='grey80')
+
+
+for (i in 2:6){
+
+points(loc_2023[i], logistic(out3[1,1]+ out3[i+2, 1] + out3[10,1]+ out3[i + 14,1] + out3[2,1]*x.hat), pch=19, cex=2.5, col='grey80')
+  
+arrows(loc_2023[i], logistic(out3[1,3]+ out3[i+2, 3] + out3[10,3]+ out3[i+14,3] + out3[2,3]*x.hat), loc_2023[i], logistic(out3[1,5]+out3[i+2,5]+ out3[10,5]+ out3[i+14,5] + out3[2,5]*x.hat), angle=90, length=0.1, lwd=2.5, code=3, col='grey80')
+
+  
+}
+
+
+# Function to draw logistic regression error
+
+run<- 'one'
+inter_coef23<- c(0, out3[16, 1], out3[17, 1], out3[18, 1], out3[19, 1], out3[20, 1])
+inter_coef_sd23<- c(0, out3[16, 2], out3[17, 2], out3[18, 2], out3[19, 2], out3[20, 2])
+
+ for (i in 1:6){
+
+  # Draw multiple points based on parameter uncertainties
+  for (j in 1:samps) {
+    # Sample intercept and slope from their distributions
+    sampled_intercept <- rnorm(1, mean = out3[1,1], sd = out3[1,2])
+    sampled_seabed <- rnorm(1, mean = out3[i+2,1], sd = out3[i+2,2])
+    sampled_depth <- rnorm(1, mean = out3[2,1], sd = out3[2,2]) *x.hat
+    sampled_year <- rnorm(1, mean = out3[10,1], sd= out3[10,2])
+    sampled_interact <- rnorm(1, mean = inter_coef23[i], inter_coef_sd23[i])
+    if(run == 'one' ){
+   points( jitter(loc_2023[i], amount=0.1), logistic(sampled_intercept + sampled_seabed + sampled_depth + sampled_year), col = adjustcolor('grey80', alpha.f=0.5), pch=19, cex=0.7)
+    } else {
+      run <- 'next'
+      points( jitter(loc_2023[i], amount=0.1), logistic(sampled_intercept + sampled_seabed + sampled_depth + sampled_year + sampled_interact), col = adjustcolor('grey80', alpha.f=0.5), pch=19, cex=0.7)
+    }
+  
+ } }
+
+
+#####################################################################################
+
+
+
+
+
+# 
+ Sim<- inla.posterior.sample(n=1, result= IMp)
+
+ names(Sim[[1]])
+ Sim[[1]]$latent
+ Sim[[1]]$hyperpar
+ Sim[[1]]$logdens
+ length(Sim[[1]]$latent)
+
+ row.names(Sim[[1]]$latent)[3160:3179]
+  Sim[[1]]$latent[3160:3179]
+ dim(Sim[[1]]$latent)
+# 
+ Sim[[1]]$latent[3160:3179,]
+
+
+ 
+ rownum<- as.numeric(c(3160:3179))
+ 
+ #Sim[[1]]$latent[c(3353,3354),]
+ 
+ Betas <- Sim[[1]]$latent[rownum]
+# 
+# 
+ mywk<- c('w')
+# 
+
+# just look for 
+Sim[[1]]$latent[3159,]
+Sim[[1]]$latent[1616,]
+
+ wk<- Sim[[1]]$latent[1616:3159,]
+ 
+ head(X)
+ Xm <- as.matrix(X)
+ 
+ Am <- as.matrix(A1.er)
+
+ 
+ FixedPart   <- Xm %*% Betas
+ SpatialPart <- Am %*% wk
+# 
+# 
+ mu   <- logistic(FixedPart + SpatialPart)
+
+ Ysim <- rbinom(n = N, size=1, prob =   mu)
+ Ysim
+
+ head(dat.er)
+ new<- cbind(met.dat.er, Ysim, dat.er$pres.ab.Dogfish)
+ head(new)
+ names(new)[14]<- 'truth'
+ 
+ 
+ new$Substratum1<- as.factor(new$Substratum1)
+ new21<- subset(new, new$Year=='2021')
+ new22<- subset(new, new$Year=='2022')
+new23<- subset(new, new$Year=='2023')
+ 
+
+points(jitter(as.numeric(new21$Substratum1)-0.2, amount =0.1), jitter(new21$truth, amount=0.05) , pch=19, cex=0.8, col='firebrick4')
+
+points(jitter(as.numeric(new22$Substratum1), amount =0.1), jitter(new22$truth, amount= 0.05) , pch=19, cex=0.8, col='firebrick3')
+   
+points(jitter(as.numeric(new23$Substratum1)+0.2, amount=0.1), jitter(new23$truth, amount=0.05) , pch=19, cex=0.8, col='firebrick1')
+
+
+ points(jitter(as.numeric(new21$Substratum1)-0.2, amount=0.1), jitter(new21$Ysim, amount=0.05), pch=19, cex=0.8, col='cadetblue4')
+
+ points(jitter(as.numeric(new22$Substratum1), amount=0.1), jitter(new22$Ysim, amount=0.05), pch=19, cex=0.8, col='cadetblue3')
+   
+ points(jitter(as.numeric(new23$Substratum1)+0.2, amount=0.1), jitter(new23$Ysim,amount=0.05), pch=19, cex=0.8, col='cadetblue1')
+
+
+########################################### show random field for spatial ##########
+
+# Plot the spatial random field
+# Get the posterior mean of the spatial field at the mesh points:
+w.pm <-logistic(IMp$summary.random$w$mean)  
+w.sd <- logistic(IMp$summary.random$w$sd)
+length(w.pm)  #mu.srf
+# This is the spatial field calculated at all the mesh points
+
+
+# Now we calculate the spatial field on a grid. 
+wproj <- inla.mesh.projector(mesh.2.er, dims=c(1000,1000))   
+
+
+
+
+
+
+
+#####################################
+
+w.pm100_100 <- inla.mesh.project(wproj, w.pm)
+w.sd100_100 <- inla.mesh.project(wproj, w.sd)
+
+# This w.pm100_100 is of dimension 100 by 100 
+# and is a projection (interpolation and extrapolation) 
+# of the random field w. We can use the levelplot 
+# function from the lattice package to plot w.pm100_100
+
+Grid <- expand.grid(Xkm = wproj$x, 
+                    Ykm = wproj$y)
+Grid$w.pm <- as.vector(w.pm100_100)    
+Grid$w.sd <- as.vector(w.sd100_100)               
+
+#col.r <- rev(rainbow(30, alpha = 0.35))
+u.proj <-  inla.mesh.projector(mesh.2.er, loc= coords.er)
+u.mean<- inla.mesh.project(u.proj, IMp$summary.random$w$mean)
+
+col.r <- rev(rainbow(30, alpha = 0.35))
+
+
+
+er.coast<- data.frame(st_coordinates(shore.er)[,1:2]/1000)
+
+levelplot(w.pm ~ Xkm * Ykm,add=T,
+          col.regions = col.r,
+          data = Grid, 
+          scales = list(draw = TRUE),
+          xlab = list("X-coordinates (km)", cex = 1.5),
+          ylab = list("Y-coordinates (km)", cex = 1.5),
+          main = list("Posterior mean spatial random field", cex = 1.5),
+          panel = function(...) {
+            panel.levelplot(...)  # Default levelplot
+            panel.points(er.coast[,1], er.coast[,2], pch = 16, col = "black", cex = 0.2)
+            panel.points(coords.er[,1], coords.er[,2], pch = 19, col = "black", cex = 0.5)  # Add points  # Add points
+          })
+
+
+
+levelplot(w.sd ~ Xkm * Ykm,
+          col.regions = col.r,
+          data = Grid, 
+          scales = list(draw = TRUE),
+          xlab = list("X-coordinates (km)", cex = 1.5),
+          ylab = list("Y-coordinates (km)", cex = 1.5),
+          main = list("Posterior sd spatial random field", cex = 1.5),
+          panel = function(...) {
+            panel.levelplot(...)  # Default levelplot
+            panel.points(er.coast[,1], er.coast[,2], pch = 16, col = "black", cex = 0.2)
+            panel.points(coords.er[,1], coords.er[,2], pch = 19, col = "black", cex = 0.5)  # Add points  # Add points
+          }) 
+ 
+ 
+
+
+
+
+
+
+
+```
+
+
+
+## INLA-SPDE approach WRoss Skate - model selection
+```{r}
+
+
+## random intercept with spatial correlation
+
+spde <- inla.spde2.matern(mesh.3.wr, alpha = 2)
+
+
+## define spatial field
+
+w.index<- inla.spde.make.index(name='w', n.spde = spde$n.spde, n.group = 1, n.repl = 1)
+str(w.index)
+## define stack for inla
+
+# start with model covariates
+met.dat.SWR.T$Substratum1<- as.factor(met.dat.SWR.T$Substratum1)
+met.dat.SWR.T$Year<- as.factor(met.dat.SWR.T$Year)
+
+levels(met.dat.SWR.T$Substratum1)
+levels(met.dat.SWR.T$Year)
+
+
+
+head(met.dat.SWR.T)
+str(met.dat.SWR.T)
+
+dat.WRXm<- model.matrix( ~  -1+ depth +  Substratum1 + Year+ 
+                             depth:Substratum1 + depth:Year +
+                             Substratum1:Year,
+                         data=met.dat.SWR.T) 
+colnames(dat.WRXm)
+
+X<- data.frame(depth                       = dat.WRXm[,1],
+              Substratum1cob_boulder       = dat.WRXm[,2],
+              Substratum1gravel            = dat.WRXm[,3],
+              Substratum1mud               = dat.WRXm[,4],
+              Substratum1muddy_sand        = dat.WRXm[,5],
+              Substratum1rock              = dat.WRXm[,6],
+              Substratum1sand              = dat.WRXm[,7],
+              Year2023                     = dat.WRXm[,8],
+              depth.Substratum1gravel      = dat.WRXm[,9],
+              depth.Substratum1mud         = dat.WRXm[,10],
+              depth.Substratum1muddy_sand  = dat.WRXm[,11],
+              depth.Substratum1rock        = dat.WRXm[,12],
+              depth.Substratum1sand        = dat.WRXm[,13], 
+              depth.Year2023               = dat.WRXm[,14],
+              Substratum1gravel.Year2023   = dat.WRXm[,15],
+              Substratum1mud.Year2023      = dat.WRXm[,16],
+              Substratum1muddy_sand.Year2023  = dat.WRXm[,17],
+              Substratum1rock.Year2023     = dat.WRXm[,18],
+              Substratum1sand.Year2023     = dat.WRXm[,19])
+
+
+
+
+N <- nrow(dat.WRXm)
+
+
+y.S<- dat.wrT$pres.ab.Skate
+
+
+StackFit.WR<- inla.stack(
+                      tag= 'Fit',
+                      data=list(y=y.S),
+                      A = list(1, 1, A1.wr),
+                      effects = list(
+                        Intercept = rep(1,N),
+                        X=X,
+                        W = w.index))
+
+
+# define formula for spatial model
+
+f1<- y ~ -1 + Intercept + depth + Substratum1cob_boulder  +  
+              Substratum1gravel            +
+              Substratum1mud               +
+              Substratum1muddy_sand       +
+              Substratum1rock             +
+              Substratum1sand + 
+              Year2023+
+              depth.Substratum1gravel   +   
+              depth.Substratum1mud        + 
+              depth.Substratum1muddy_sand  +
+              depth.Substratum1rock       +
+              depth.Substratum1sand  + 
+              depth.Year2023  +           
+              Substratum1gravel.Year2023   +
+              Substratum1mud.Year2023     +
+              Substratum1muddy_sand.Year2023 +
+              Substratum1rock.Year2023     +
+              Substratum1sand.Year2023 + f(w, model = spde)# with spatial element and interaction
+  
+f2<- y ~ -1 + Intercept + depth + Substratum1cob_boulder  +  
+              Substratum1gravel            +
+              Substratum1mud               +
+              Substratum1muddy_sand       +
+              Substratum1rock             +
+              Substratum1sand + 
+              Year2023+
+              depth.Substratum1gravel   +   
+              depth.Substratum1mud        + 
+              depth.Substratum1muddy_sand  +
+              depth.Substratum1rock       +
+              depth.Substratum1sand  + 
+              depth.Year2023  +           
+              f(w, model = spde) #  remove substratum:year
+
+
+IM1<- inla(f1,
+           family = 'binomial',
+           data= inla.stack.data(StackFit.WR),
+           control.compute = list(
+               dic=TRUE,
+               waic=TRUE),
+           control.predictor = list(
+               A = inla.stack.A(StackFit.WR)))
+
+IM2<- inla(f2,
+           family = 'binomial',
+           data= inla.stack.data(StackFit.WR),
+           control.compute = list(
+               dic=TRUE,
+               waic=TRUE),
+           control.predictor = list(
+               A = inla.stack.A(StackFit.WR)))
+
+
+
+c(IM1$dic$dic, IM2$dic$dic)
+c(IM1$waic$waic, IM2$waic$waic) ## so now that Year is included best to drop spatial interaction
+
+f3<- y ~ -1 + Intercept + depth + Substratum1cob_boulder  +  
+              Substratum1gravel            +
+              Substratum1mud               +
+              Substratum1muddy_sand       +
+              Substratum1rock             +
+              Substratum1sand + 
+              Year2023+
+              
+              depth.Year2023  +           
+              f(w, model = spde) #  remove substratum:depth
+
+
+  
+IM3<- inla(f3,
+           family = 'binomial',
+           data= inla.stack.data(StackFit.WR),
+           control.compute = list(
+               dic=TRUE,
+               waic=TRUE),
+           control.predictor = list(
+               A = inla.stack.A(StackFit.WR)))
+
+c(IM2$dic$dic, IM3$dic$dic)
+c(IM2$waic$waic, IM3$waic$waic) ## better without depth:substratum
+  
+
+ f4<- y ~ -1 +Intercept + depth + Substratum1cob_boulder  +  
+              Substratum1gravel            +
+              Substratum1mud               +
+              Substratum1muddy_sand       +
+              Substratum1rock             +
+              Substratum1sand + 
+              Year2023+
+              
+                     
+              f(w, model = spde) #  remove depth:year
+ 
+ IM4<- inla(f4,
+           family = 'binomial',
+           data= inla.stack.data(StackFit.WR),
+           control.compute = list(
+               dic=TRUE,
+               waic=TRUE),
+           control.predictor = list(
+               A = inla.stack.A(StackFit.WR)))    
+ 
+ 
+ c(IM3$dic$dic, IM4$dic$dic)
+c(IM3$waic$waic, IM4$waic$waic) 
+ 
+  f5<- y ~ -1 +Intercept + depth + Substratum1cob_boulder  +  
+              Substratum1gravel            +
+              Substratum1mud               +
+              Substratum1muddy_sand       +
+              Substratum1rock             +
+              Substratum1sand + 
+             
+              
+                     
+              f(w, model = spde) #  remove year
+ 
+ IM5<- inla(f5,
+           family = 'binomial',
+           data= inla.stack.data(StackFit.WR),
+           control.compute = list(
+               dic=TRUE,
+               waic=TRUE),
+           control.predictor = list(
+               A = inla.stack.A(StackFit.WR)))    
+ 
+ 
+ c(IM4$dic$dic, IM5$dic$dic)
+c(IM4$waic$waic, IM5$waic$waic) # better without year
+ 
+
+f6<- y ~ -1 +Intercept + depth + 
+             
+              
+                     
+              f(w, model = spde) #  remove substratum
+ 
+ IM6<- inla(f6,
+           family = 'binomial',
+           data= inla.stack.data(StackFit.WR),
+           control.compute = list(
+               dic=TRUE,
+               waic=TRUE),
+           control.predictor = list(
+               A = inla.stack.A(StackFit.WR)))    
+ 
+ 
+ c(IM5$dic$dic, IM6$dic$dic)
+c(IM5$waic$waic, IM6$waic$waic)
+
+
+
+f7<- y ~ -1 +Intercept +  
+             
+              
+                     
+              f(w, model = spde) #  remove substratum
+ 
+ IM7<- inla(f7,
+           family = 'binomial',
+           data= inla.stack.data(StackFit.WR),
+           control.compute = list(
+               dic=TRUE,
+               waic=TRUE),
+           control.predictor = list(
+               A = inla.stack.A(StackFit.WR)))    
+ 
+ 
+ c(IM6$dic$dic, IM7$dic$dic)
+c(IM6$waic$waic, IM7$waic$waic)
+
+
+```
+
+
+
+### Prediction - spatial
+```{r}
+# 
+
+
+### best model
+N<- nrow(dat.WRXm)
+X<- data.frame(Intercept                      = rep(1, N))
+
+
+f7<- y ~ -1 + Intercept + 
+              
+               f(w, model = spde)  
+                
+                
+ 
+ 
+
+ IMp<- inla(f7,
+           family = 'binomial',
+           data= inla.stack.data(StackFit.WR),
+           control.compute = list(config= TRUE),
+           control.predictor = list(
+               A = inla.stack.A(StackFit.WR)))   
+
+
+
+
+## model interpretation
+
+out7<- IMp$summary.fixed
+
+print(out7, digits=2)
+
+
+
+########################################### show random field for spatial ##########
+
+# Plot the spatial random field
+# Get the posterior mean of the spatial field at the mesh points:
+w.pm <- logistic(IMp$summary.random$w$mean)  
+w.sd <- logistic(IMp$summary.random$w$sd)
+length(w.pm)  #mu.srf
+# This is the spatial field calculated at all the mesh points
+
+
+# Now we calculate the spatial field on a grid. 
+wproj <- inla.mesh.projector(mesh.3.wr, dims=c(1000,1000))   
+
+
+
+
+w.pm100_100 <- inla.mesh.project(wproj, w.pm)
+w.sd100_100 <- inla.mesh.project(wproj, w.sd)
+
+# This w.pm100_100 is of dimension 100 by 100 
+# and is a projection (interpolation and extrapolation) 
+# of the random field w. We can use the levelplot 
+# function from the lattice package to plot w.pm100_100
+
+Grid <- expand.grid(Xkm = wproj$x, 
+                    Ykm = wproj$y)
+Grid$w.pm <- as.vector(w.pm100_100) 
+Grid$w.sd <- as.vector(w.sd100_100)               
+
+col.r <- rev(rainbow(30, alpha = 0.35))
+u.proj <-  inla.mesh.projector(mesh.3.wr, loc= coords.wr)
+u.mean<- inla.mesh.project(u.proj, IMp$summary.random$w$mean)
+
+
+
+wr.coast<- data.frame(st_coordinates(shore.wr)[,1:2]/1000)
+
+levelplot(w.pm ~ Xkm * Ykm,add=T,
+          col.regions = col.r,
+          data = Grid, 
+          scales = list(draw = TRUE),
+          xlab = list("X-coordinates (km)", cex = 1.5),
+          ylab = list("Y-coordinates (km)", cex = 1.5),
+          main = list("Posterior mean spatial random field", cex = 1.5),
+          panel = function(...) {
+            panel.levelplot(...)  # Default levelplot
+            panel.points(wr.coast[,1], wr.coast[,2], pch = 16, col = "black", cex = 0.2)
+            panel.points(coords.wr[,1], coords.wr[,2], pch = 19, col = "black", cex = 0.5)  # Add points  # Add points
+          })
+
+
+
+levelplot(w.sd ~ Xkm * Ykm,
+          col.regions = col.r,
+          data = Grid, 
+          scales = list(draw = TRUE),
+          xlab = list("X-coordinates (km)", cex = 1.5),
+          ylab = list("Y-coordinates (km)", cex = 1.5),
+          main = list("Posterior sd spatial random field", cex = 1.5),
+          panel = function(...) {
+            panel.levelplot(...)  # Default levelplot
+            panel.points(wr.coast[,1], wr.coast[,2], pch = 16, col = "black", cex = 0.2)
+            panel.points(coords.wr[,1], coords.wr[,2], pch = 19, col = "black", cex = 0.5)  # Add points  # Add points
+          }) 
+ 
+ 
+
+
+
+
+
+
+```
+
+
+
+
+
+
+## INLA-SPDE approach Eriboll Skate - model selection
+```{r}
+
+
+## random intercept with spatial correlation
+
+spde <- inla.spde2.matern(mesh.2.er, alpha = 2)
+
+
+## define spatial field
+
+w.index<- inla.spde.make.index(name='w', n.spde = spde$n.spde, n.group = 1, n.repl = 1)
+
+## define stack
+
+# start with model covariates
+met.dat.Ser.T$Substratum1<- as.factor(met.dat.Ser.T$Substratum1)
+levels(met.dat.Ser.T$Substratum1)
+head(met.dat.Ser.T)
+str(met.dat.Ser.T)
+
+met.dat.Ser.T$Year<- as.factor(met.dat.Ser.T$Year)
+
+
+dat.ERXm<- model.matrix( ~  -1+ depth +  Substratum1 + Year+ 
+                             depth:Substratum1 + depth:Year +
+                             Substratum1:Year,
+                         data=met.dat.Ser.T) 
+colnames(dat.ERXm)
+
+
+
+X<- data.frame(depth                       = dat.ERXm[,1],
+              Substratum1cob_boulder       = dat.ERXm[,2],
+              Substratum1gravel            = dat.ERXm[,3],
+              Substratum1mud               = dat.ERXm[,4],
+              Substratum1muddy_sand        = dat.ERXm[,5],
+              Substratum1rock              = dat.ERXm[,6],
+              Substratum1sand              = dat.ERXm[,7],
+              Year2022                     = dat.ERXm[,8],
+              Year2023                     = dat.ERXm[,9],
+              depth.Substratum1gravel      = dat.ERXm[,10],
+              depth.Substratum1mud         = dat.ERXm[,11],
+              depth.Substratum1muddy_sand  = dat.ERXm[,12],
+              depth.Substratum1rock        = dat.ERXm[,13],
+              depth.Substratum1sand        = dat.ERXm[,14], 
+              depth.Year2022               = dat.ERXm[,15],
+              depth.Year2023               = dat.ERXm[,16],
+              Substratum1gravel.Year2022   = dat.ERXm[,17],
+              Substratum1mud.Year2022      = dat.ERXm[,18],
+              Substratum1muddy_sand.Year2022  = dat.ERXm[,19],
+              Substratum1rock.Year2022    = dat.ERXm[,20],
+              Substratum1sand.Year2022     = dat.ERXm[,21],
+               Substratum1gravel.Year2023   = dat.ERXm[,22],
+              Substratum1mud.Year2023      = dat.ERXm[,23],
+              Substratum1muddy_sand.Year2023  = dat.ERXm[,24],
+              Substratum1rock.Year2023    = dat.ERXm[,25],
+              Substratum1sand.Year2023     = dat.ERXm[,26]    )
+
+
+N <- nrow(dat.ERXm)
+
+
+
+y.S<- dat.erT$pres.ab.Skate
+
+
+
+
+StackFit.ER<- inla.stack(
+                      tag= 'Fit',
+                      data=list(y=y.S),
+                      A = list(1, 1, A1.er),
+                      effects = list(
+                        Intercept = rep(1,N),
+                        X=X,
+                        W = w.index))
+
+
+# define formula for spatial model similar to above
+
+f1<- y ~ -1 + Intercept + 
+              depth                       +
+              Substratum1cob_boulder       +
+              Substratum1gravel            +
+              Substratum1mud               +
+              Substratum1muddy_sand       +
+              Substratum1rock             +
+              Substratum1sand             +
+              Year2022                    +
+              Year2023                    +
+              depth.Substratum1gravel     +
+              depth.Substratum1mud        +
+              depth.Substratum1muddy_sand  +
+              depth.Substratum1rock        +
+              depth.Substratum1sand        + 
+              depth.Year2022               +
+              depth.Year2023              +
+              Substratum1gravel.Year2022   +
+              Substratum1mud.Year2022      +
+              Substratum1muddy_sand.Year2022 +
+              Substratum1rock.Year2022    +
+              Substratum1sand.Year2022     +
+               Substratum1gravel.Year2023   +
+              Substratum1mud.Year2023     +
+              Substratum1muddy_sand.Year2023 +
+              Substratum1rock.Year2023    +
+              Substratum1sand.Year2023     +   f(w, model = spde)# with spatial element and interaction
+  
+f2<- y ~ -1 + Intercept + 
+              depth                       +
+              Substratum1cob_boulder       +
+              Substratum1gravel            +
+              Substratum1mud               +
+              Substratum1muddy_sand       +
+              Substratum1rock             +
+              Substratum1sand             +
+              Year2022                    +
+              Year2023                    +
+              depth.Substratum1gravel     +
+              depth.Substratum1mud        +
+              depth.Substratum1muddy_sand  +
+              depth.Substratum1rock        +
+              depth.Substratum1sand        + 
+              depth.Year2022               +
+              depth.Year2023              +
+                 f(w, model = spde)# remove substratum:year
+
+
+
+
+
+IM1<- inla(f1,
+           family = 'binomial',
+           data= inla.stack.data(StackFit.ER),
+           control.compute = list(
+               dic=TRUE,
+               waic=TRUE),
+           control.predictor = list(
+               A = inla.stack.A(StackFit.ER)))
+
+IM2<- inla(f2,
+           family = 'binomial',
+           data= inla.stack.data(StackFit.ER),
+           control.compute = list(
+               dic=TRUE,
+               waic=TRUE),
+           control.predictor = list(
+               A = inla.stack.A(StackFit.ER)))
+
+
+c(IM1$dic$dic, IM2$dic$dic)
+c(IM1$waic$waic, IM2$waic$waic) ## so drop substratum:year
+
+f3<- y ~ -1 + Intercept + 
+              depth                       +
+              Substratum1cob_boulder       +
+              Substratum1gravel            +
+              Substratum1mud               +
+              Substratum1muddy_sand       +
+              Substratum1rock             +
+              Substratum1sand             +
+              Year2022                    +
+              Year2023                    +
+              depth.Substratum1gravel     +
+              depth.Substratum1mud        +
+              depth.Substratum1muddy_sand  +
+              depth.Substratum1rock        +
+              depth.Substratum1sand        + 
+             
+                 f(w, model = spde)# remove depth:year
+
+
+
+
+IM3<- inla(f3,
+           family = 'binomial',
+           data= inla.stack.data(StackFit.ER),
+           control.compute = list(
+               dic=TRUE,
+               waic=TRUE),
+           control.predictor = list(
+               A = inla.stack.A(StackFit.ER)))
+
+c(IM2$dic$dic, IM3$dic$dic)
+c(IM2$waic$waic, IM3$waic$waic) ## so no need depth:year
+  
+
+
+ f4<- y ~ -1 + Intercept + 
+              depth                       +
+              Substratum1cob_boulder       +
+              Substratum1gravel            +
+              Substratum1mud               +
+              Substratum1muddy_sand       +
+              Substratum1rock             +
+              Substratum1sand             +
+              Year2022                    +
+              Year2023                    +
+              
+                 f(w, model = spde)# remove substratum:substratum
+ 
+ IM4<- inla(f4,
+           family = 'binomial',
+           data= inla.stack.data(StackFit.ER),
+           control.compute = list(
+               dic=TRUE,
+               waic=TRUE),
+           control.predictor = list(
+               A = inla.stack.A(StackFit.ER)))    
+ 
+ 
+c(IM3$dic$dic, IM4$dic$dic)
+c(IM3$waic$waic, IM4$waic$waic) ## so better without depth:substratum
+ 
+ 
+f5<- y ~ -1 + Intercept + 
+              depth                       +
+              Substratum1cob_boulder       +
+              Substratum1gravel            +
+              Substratum1mud               +
+              Substratum1muddy_sand       +
+              Substratum1rock             +
+              Substratum1sand             +
+             
+              
+                 f(w, model = spde)# remove year
+ 
+ IM5<- inla(f5,
+           family = 'binomial',
+           data= inla.stack.data(StackFit.ER),
+           control.compute = list(
+               dic=TRUE,
+               waic=TRUE),
+           control.predictor = list(
+               A = inla.stack.A(StackFit.ER)))   
+
+ c( IM4$dic$dic, IM5$dic$dic)
+ c( IM4$waic$waic, IM5$waic$waic) # better without year
+ 
+
+ 
+ 
+ 
+ f6<- y ~ -1 + Intercept + 
+              depth                       +
+             
+             
+              
+                 f(w, model = spde)# remove substratum
+ 
+ IM6<- inla(f6,
+           family = 'binomial',
+           data= inla.stack.data(StackFit.ER),
+           control.compute = list(
+               dic=TRUE,
+               waic=TRUE),
+           control.predictor = list(
+               A = inla.stack.A(StackFit.ER)))   
+
+ c( IM5$dic$dic, IM6$dic$dic)
+ c( IM5$waic$waic, IM6$waic$waic) #  better without substratum
+ 
+ 
+ f7<- y ~ -1 + Intercept + 
+              
+             
+             
+              
+                 f(w, model = spde)# remove year
+ 
+ IM7<- inla(f7,
+           family = 'binomial',
+           data= inla.stack.data(StackFit.ER),
+           control.compute = list(
+               dic=TRUE,
+               waic=TRUE),
+           control.predictor = list(
+               A = inla.stack.A(StackFit.ER)))   
+
+ c( IM6$dic$dic, IM7$dic$dic)
+ c( IM6$waic$waic, IM7$waic$waic) # better with depth in model 6
+ 
+
+```
+
+
+### Prior predictive simulation
+
+The model is P ~ Intercept +  depth     
+Dogfish prior mean= 0.0, prec = 0.9 ## probably see some 
+Skate prior mean = -0.5, prec = 1.2 ## unlikely but possible
+Thornback and spotted prior mean = -0.25, prec = 1.2 ## unlikely but more likely than skate
+
+```{r}
+
+
+f6<- y ~ -1 + Intercept + 
+              depth    +
+                  f(w, model = spde)
+
+
+IM6<- inla(f6,
+           family = 'binomial',
+           data= inla.stack.data(StackFit.ER),
+           control.compute = list(
+               dic=TRUE,
+               waic=TRUE),
+           control.predictor = list(
+               A = inla.stack.A(StackFit.ER)))   
+
+
+inla.set.control.fixed.default(IM6)
+
+ 
+## model interpretation
+
+out6<- IM6$summary.fixed
+
+
+
+
+# Assuming logistic() is defined as:
+logistic <- function(x) 1 / (1 + exp(-x))
+
+
+
+out6
+# prior sim
+
+# default priors
+mean = 0
+prec = 0.001
+
+mean.inter = 0
+prec.inter= 0
+
+sims=700
+outD<- out6
+outD[1,1]<- mean.inter
+outD[1,2]<- prec.inter
+outD[2,1]<- mean
+outD[2,2]<- prec
+
+
+plot(NA, ylim=c(0, 1), xlim=c(0,-150), ylab='Probability of presence', xlab ='Depth', yaxt='n', xaxt='n')
+axis(1, at= c(0,-50, -100, -150), labels = c(0,-50, -100, -150))
+axis(2, at= c(0,0.5, 1), labels = c(0,0.5, 1), las=2)
+
+# Function to draw logistic regression error bounds
+draw_logistic_error <- function(intercept, intercept_sd, slope, slope_sd, depth = c(0,-150), n_curves = 500) {
+  # Define the logistic function
+  logistic <- function(x, b0, b1) {
+    1 / (1 + exp(-(b0 + b1 * x)))
+  }
+  
+  # Create a sequence of x values
+  x_vals <- seq(depth[1], depth[2], length.out = 1000)
+  
+
+  # Draw multiple curves based on parameter uncertainties
+  for (i in 1:n_curves) {
+    # Sample intercept and slope from their distributions
+    sampled_intercept <- rnorm(1, mean = intercept, sd = intercept_sd)
+    sampled_slope <- rnorm(1, mean = slope, sd = slope_sd)
+    
+    # Add the sampled curve
+    curve(logistic(x, sampled_intercept, sampled_slope), from = depth[1], to = depth[2], 
+          col = adjustcolor('mediumseagreen', alpha.f=0.3), add = TRUE)
+  }
+}
+
+draw_logistic_error(intercept = out6[1,1], intercept_sd = out6[1,2], 
+                    slope = out6[2,1], slope_sd = out6[2,2])
+
+
+
+# tradition "flat normal"
+# mean = 0  # Prior mean for all fixed effects
+# prec = 10 # precision for prior
+
+######################################################## My priors ##############################
+
+mean_inter= -5
+  sd_inter = 2
+  mean = 0  # Prior mean for all fixed effects ---- here if we move to say -0.5 then it reduces the mean below 0 assuming less than 50% probability of seeing one
+
+sd_depth=0.15
+
+
+sims=600
+
+
+outD<- out6
+outD[1,1]<- mean_inter
+outD[1,2]<- sd_inter
+outD[2,1]<- mean
+outD[2,2]<- sd_depth
+outD
+
+
+plot(NA, ylim=c(0, 1), xlim=c(0,-150), ylab='Probability of presence', xlab ='Depth', yaxt='n', xaxt='n')
+axis(1, at= c(0,-50, -100, -150), labels = c(0,-50, -100, -150))
+axis(2, at= c(0,0.5, 1), labels = c(0,0.5, 1), las=2)
+
+# Function to draw logistic regression error bounds
+draw_logistic_error <- function(intercept, intercept_sd, slope, slope_sd, depth = c(0,-150), n_curves = sims) {
+  # Define the logistic function
+  logistic <- function(x, b0, b1) {
+    1 / (1 + exp(-(b0 + b1 * x)))
+  }
+  
+  # Create a sequence of x values
+  x_vals <- seq(depth[1], depth[2], length.out = 1000)
+  
+
+  # Draw multiple curves based on parameter uncertainties
+  for (i in 1:n_curves) {
+    # Sample intercept and slope from their distributions
+    sampled_intercept <- rnorm(1, mean = intercept, sd = intercept_sd)
+    sampled_slope <- rnorm(1, mean = slope, sd = slope_sd)
+    
+    # Add the sampled curve
+    curve(logistic(x, sampled_intercept, sampled_slope), from = depth[1], to = depth[2], 
+          col = adjustcolor('mediumseagreen', alpha.f=0.3), add = TRUE)
+  }
+}
+
+draw_logistic_error(intercept = outD[1,1], intercept_sd = outD[1,2], 
+                    slope = outD[2,1], slope_sd = outD[2,2])
+############################################################
+
+
+
+```
+
+### Prediction
+```{r}
+
+N<- nrow(dat.ERXm)
+X<- data.frame(Intercept    = rep(1, N),
+              depth       = dat.ERXm[,1]
+               )
+
+
+f6<- y ~ -1 + Intercept + 
+              depth    +
+                     f(w, model = spde)
+
+
+ mean_inter= -5
+  sd_inter = 2
+  mean = 0  # Prior mean for all fixed effects ---- here if we move to say -0.5 then it reduces the mean below 0 assuming less than 50% probability of seeing one
+
+sd_depth=0.15
+
+
+ IMp<- inla(f6,
+           family = 'binomial',
+           data= inla.stack.data(StackFit.ER),
+           control.compute = list(config= TRUE),
+           control.predictor = list(
+               A = inla.stack.A(StackFit.ER)),
+           control.fixed = list(
+            mean = list(Intercept=-5, depth=0),  # Prior mean for all fixed effects
+            prec = list(Intercept = prec(2), depth= prec(0.15) ) # Prior precision (1 / variance)
+           ))
+
+## model interpretation
+
+out6<- IMp$summary.fixed
+
+print(out6, digits=2)
+
+### Probability of presence plots and later add predicted and true data.
+set.seed(1234)
+plot(NA, ylim=c(0, 1), xlim=c(0,-150), ylab='Probability of presence', xlab ='Depth', yaxt='n', xaxt='n')
+axis(1, at= c(0,-50, -100, -150), labels = c(0,-50, -100, -150))
+axis(2, at= c(0,0.5, 1), labels = c(0,0.5, 1), las=2)
+
+# Function to draw logistic regression error bounds
+draw_logistic_error <- function(intercept, intercept_sd, slope, slope_sd, depth = c(0,-150), n_curves = 500) {
+  # Define the logistic function
+  logistic <- function(x, b0, b1) {
+    1 / (1 + exp(-(b0 + b1 * x)))
+  }
+  
+  # Create a sequence of x values
+  x_vals <- seq(depth[1], depth[2], length.out = 1000)
+  
+  # Plot the main logistic curve (using the mean parameters)
+  
+  curve(logistic(x, intercept, slope), from = depth[1], to = depth[2], 
+        col = "blue", lwd = 2.5, add=TRUE)
+  
+  # Draw multiple curves based on parameter uncertainties
+  for (i in 1:n_curves) {
+    # Sample intercept and slope from their distributions
+    sampled_intercept <- rnorm(1, mean = intercept, sd = intercept_sd)
+    sampled_slope <- rnorm(1, mean = slope, sd = slope_sd)
+    
+    # Add the sampled curve
+    curve(logistic(x, sampled_intercept, sampled_slope), from = depth[1], to = depth[2], 
+          col = rgb(0, 0, 1, alpha = 0.1), add = TRUE)
+  }
+}
+
+# Function to add 95% credible intervals
+add_credible_intervals <- function(intercept, intercept_sd, slope, slope_sd, depth = c(0,-150), n_samples = 1000) {
+  # Define the logistic function
+  logistic <- function(x, b0, b1) {
+    1 / (1 + exp(-(b0 + b1 * x)))
+  }
+x_vals <- seq(depth[1], depth[2], length.out = 1000)
+  
+# Initialize a matrix to store probabilities
+  prob_matrix <- matrix(0, nrow = n_samples, ncol = length(x_vals))
+
+  for (i in 1:n_samples) {
+    sampled_intercept <- rnorm(1, mean = intercept, sd = intercept_sd)
+    sampled_slope <- rnorm(1, mean = slope, sd = slope_sd)
+    prob_matrix[i, ] <- logistic(x_vals, sampled_intercept, sampled_slope)
+  }
+  
+ # Calculate the 95% credible intervals
+  lower_bound <- apply(prob_matrix, 2, quantile, probs = 0.025)
+  upper_bound <- apply(prob_matrix, 2, quantile, probs = 0.975)
+  
+  # Add the credible interval lines to the plot
+  lines(x_vals, lower_bound, col = "blue", lty = 2, lwd = 2.5)
+  lines(x_vals, upper_bound, col = "blue", lty = 2, lwd = 2.5)
+}
+  
+  
+  
+  
+  
+# Draw the lines
+
+
+draw_logistic_error(intercept = out6[1,1], intercept_sd = out6[1,2], 
+                    slope = out6[2,1], slope_sd = out6[2,2])
+
+
+add_credible_intervals(intercept = out6[1,1], intercept_sd = out6[1,2], 
+                    slope = out6[2,1], slope_sd = out6[2,2])
+
+
+
+
+
+
+
+# 
+ Sim<- inla.posterior.sample(n=1, result= IMp)
+
+ names(Sim[[1]])
+ Sim[[1]]$latent
+ Sim[[1]]$hyperpar
+ Sim[[1]]$logdens
+ length(Sim[[1]]$latent)
+
+ row.names(Sim[[1]]$latent)[3160:3161]
+ 
+ 
+ rownum<- as.numeric(c(3160:3161))
+ 
+ #Sim[[1]]$latent[c(3353,3354),]
+ 
+ Betas <- Sim[[1]]$latent[rownum]
+# 
+
+# just look for 
+Sim[[1]]$latent[3159,]
+Sim[[1]]$latent[1616,]
+
+ wk<- Sim[[1]]$latent[1616:3159,]
+ 
+ head(X)
+ Xm <- as.matrix(X)
+ 
+ Am <- as.matrix(A1.er)
+
+ 
+ FixedPart   <- Xm %*% Betas
+ SpatialPart <- Am %*% wk
+# 
+# 
+ mu   <- logistic(FixedPart + SpatialPart)
+
+ Ysim <- rbinom(n = N, size=1, prob =   mu)
+ Ysim
+### find the one with depth in and add it here
+ head(dat.er)
+ head(met.dat.Ser.T)
+ new<- cbind(met.dat.Ser.T, Ysim, dat.er$pres.ab.Skate)
+ head(new)
+ names(new)[13]<- 'truth'
+
+ 
+points(jitter(truth, amount= 0.02) ~ depth, data= new, col=adjustcolor('firebrick4', alpha.f = 1), cex=0.8, pch =19)
+points(jitter(Ysim, amount= 0.01) ~ depth, data= new, col= adjustcolor('cadetblue4', alpha.f = 1), cex=0.8, pch=19)
+
+
+
+########################################### show random field for spatial ##########
+
+# Plot the spatial random field
+# Get the posterior mean of the spatial field at the mesh points:
+w.pm <- logistic(IMp$summary.random$w$mean)  
+w.sd <- logistic(IMp$summary.random$w$sd)
+length(w.pm)  #mu.srf
+# This is the spatial field calculated at all the mesh points
+
+
+# Now we calculate the spatial field on a grid. 
+wproj <- inla.mesh.projector(mesh.2.er, dims=c(1000,1000))   
+
+
+
+w.pm100_100 <- inla.mesh.project(wproj, w.pm)
+w.sd100_100 <- inla.mesh.project(wproj, w.sd)
+
+# This w.pm100_100 is of dimension 100 by 100 
+# and is a projection (interpolation and extrapolation) 
+# of the random field w. We can use the levelplot 
+# function from the lattice package to plot w.pm100_100
+
+Grid <- expand.grid(Xkm = wproj$x, 
+                    Ykm = wproj$y)
+Grid$w.pm <- as.vector(w.pm100_100)  
+Grid$w.sd <- as.vector(w.sd100_100)               
+
+col.r <- rev(rainbow(30, alpha = 0.35))
+u.proj <-  inla.mesh.projector(mesh.2.er, loc= coords.er)
+u.mean<- inla.mesh.project(u.proj, IMp$summary.random$w$mean)
+
+
+
+
+er.coast<- data.frame(st_coordinates(shore.er)[,1:2]/1000)
+
+levelplot(w.pm ~ Xkm * Ykm, add=T,
+          col.regions = col.r,
+          data = Grid, 
+          scales = list(draw = TRUE),
+          xlab = list("X-coordinates (km)", cex = 1.5),
+          ylab = list("Y-coordinates (km)", cex = 1.5),
+          main = list("Posterior mean spatial random field", cex = 1.5),
+          panel = function(...) {
+            panel.levelplot(...)  # Default levelplot
+            panel.points(er.coast[,1], er.coast[,2], pch = 16, col = "black", cex = 0.2)
+            panel.points(coords.er[,1], coords.er[,2], pch = 19, col = "black", cex = 0.5)  # Add points  # Add points
+          })
+
+
+
+levelplot(w.sd ~ Xkm * Ykm,
+          col.regions = col.r,
+          data = Grid, 
+          scales = list(draw = TRUE),
+          xlab = list("X-coordinates (km)", cex = 1.5),
+          ylab = list("Y-coordinates (km)", cex = 1.5),
+          main = list("Posterior sd spatial random field", cex = 1.5),
+          panel = function(...) {
+            panel.levelplot(...)  # Default levelplot
+            panel.points(er.coast[,1], er.coast[,2], pch = 16, col = "black", cex = 0.2)
+            panel.points(coords.er[,1], coords.er[,2], pch = 19, col = "black", cex = 0.5)  # Add points  # Add points
+          }) 
+ 
+ 
+
+
+
+```
+
+
+
+
+## INLA-SPDE approach WRoss Thornback - model selection
+```{r}
+
+
+## random intercept with spatial correlation
+
+spde <- inla.spde2.matern(mesh.3.wr, alpha = 2)
+
+
+## define spatial field
+
+w.index<- inla.spde.make.index(name='w', n.spde = spde$n.spde, n.group = 1, n.repl = 1)
+str(w.index)
+## define stack for inla
+
+# start with model covariates
+met.dat.SWR.T$Substratum1<- as.factor(met.dat.SWR.T$Substratum1)
+met.dat.SWR.T$Year<- as.factor(met.dat.SWR.T$Year)
+
+levels(met.dat.SWR.T$Substratum1)
+levels(met.dat.SWR.T$Year)
+
+
+
+head(met.dat.SWR.T)
+str(met.dat.SWR.T)
+
+dat.WRXm<- model.matrix( ~  -1+ depth +  Substratum1 + Year+ 
+                             depth:Substratum1 + depth:Year +
+                             Substratum1:Year,
+                         data=met.dat.SWR.T) 
+colnames(dat.WRXm)
+
+X<- data.frame(depth                       = dat.WRXm[,1],
+              Substratum1cob_boulder       = dat.WRXm[,2],
+              Substratum1gravel            = dat.WRXm[,3],
+              Substratum1mud               = dat.WRXm[,4],
+              Substratum1muddy_sand        = dat.WRXm[,5],
+              Substratum1rock              = dat.WRXm[,6],
+              Substratum1sand              = dat.WRXm[,7],
+              Year2023                     = dat.WRXm[,8],
+              depth.Substratum1gravel      = dat.WRXm[,9],
+              depth.Substratum1mud         = dat.WRXm[,10],
+              depth.Substratum1muddy_sand  = dat.WRXm[,11],
+              depth.Substratum1rock        = dat.WRXm[,12],
+              depth.Substratum1sand        = dat.WRXm[,13], 
+              depth.Year2023               = dat.WRXm[,14],
+              Substratum1gravel.Year2023   = dat.WRXm[,15],
+              Substratum1mud.Year2023      = dat.WRXm[,16],
+              Substratum1muddy_sand.Year2023  = dat.WRXm[,17],
+              Substratum1rock.Year2023     = dat.WRXm[,18],
+              Substratum1sand.Year2023     = dat.WRXm[,19])
+
+
+
+
+N <- nrow(dat.WRXm)
+
+
+y.Th<- dat.wrT$pres.ab.Thornback
+
+
+StackFit.WR<- inla.stack(
+                      tag= 'Fit',
+                      data=list(y=y.Th),
+                      A = list(1, 1, A1.wr),
+                      effects = list(
+                        Intercept = rep(1,N),
+                        X=X,
+                        W = w.index))
+
+
+# define formula for spatial model
+
+f1<- y ~ -1 + Intercept + depth + Substratum1cob_boulder  +  
+              Substratum1gravel            +
+              Substratum1mud               +
+              Substratum1muddy_sand       +
+              Substratum1rock             +
+              Substratum1sand + 
+              Year2023+
+              depth.Substratum1gravel   +   
+              depth.Substratum1mud        + 
+              depth.Substratum1muddy_sand  +
+              depth.Substratum1rock       +
+              depth.Substratum1sand  + 
+              depth.Year2023  +           
+              Substratum1gravel.Year2023   +
+              Substratum1mud.Year2023     +
+              Substratum1muddy_sand.Year2023 +
+              Substratum1rock.Year2023     +
+              Substratum1sand.Year2023 + f(w, model = spde)# with spatial element and interaction
+  
+f2<- y ~ -1 + Intercept + depth + Substratum1cob_boulder  +  
+              Substratum1gravel            +
+              Substratum1mud               +
+              Substratum1muddy_sand       +
+              Substratum1rock             +
+              Substratum1sand + 
+              Year2023+
+              depth.Substratum1gravel   +   
+              depth.Substratum1mud        + 
+              depth.Substratum1muddy_sand  +
+              depth.Substratum1rock       +
+              depth.Substratum1sand  + 
+              depth.Year2023  +           
+               f(w, model = spde)# remove substratum:year
+
+
+IM1<- inla(f1,
+           family = 'binomial',
+           data= inla.stack.data(StackFit.WR),
+           control.compute = list(
+               dic=TRUE,
+               waic=TRUE),
+           control.predictor = list(
+               A = inla.stack.A(StackFit.WR)))
+
+IM2<- inla(f2,
+           family = 'binomial',
+           data= inla.stack.data(StackFit.WR),
+           control.compute = list(
+               dic=TRUE,
+               waic=TRUE),
+           control.predictor = list(
+               A = inla.stack.A(StackFit.WR)))
+
+
+
+c(IM1$dic$dic, IM2$dic$dic)
+c(IM1$waic$waic, IM2$waic$waic) ## better without substratum:year
+
+
+f3<- y ~ -1 + Intercept + depth + Substratum1cob_boulder  +  
+              Substratum1gravel            +
+              Substratum1mud               +
+              Substratum1muddy_sand       +
+              Substratum1rock             +
+              Substratum1sand + 
+              Year2023+
+              depth.Substratum1gravel   +   
+              depth.Substratum1mud        + 
+              depth.Substratum1muddy_sand  +
+              depth.Substratum1rock       +
+              depth.Substratum1sand  + 
+                       
+               f(w, model = spde)# remove depth:year
+
+
+  
+IM3<- inla(f3,
+           family = 'binomial',
+           data= inla.stack.data(StackFit.WR),
+           control.compute = list(
+               dic=TRUE,
+               waic=TRUE),
+           control.predictor = list(
+               A = inla.stack.A(StackFit.WR)))
+
+c(IM2$dic$dic, IM3$dic$dic)
+c(IM2$waic$waic, IM3$waic$waic) ## so keep depth:year
+  
+
+ f4<- y ~ -1 + Intercept + depth + Substratum1cob_boulder  +  
+              Substratum1gravel            +
+              Substratum1mud               +
+              Substratum1muddy_sand       +
+              Substratum1rock             +
+              Substratum1sand + 
+              Year2023+
+              
+              depth.Year2023  +           
+               f(w, model = spde)# remove depth:substratum
+                 
+                
+ 
+ IM4<- inla(f4,
+           family = 'binomial',
+           data= inla.stack.data(StackFit.WR),
+           control.compute = list(
+               dic=TRUE,
+               waic=TRUE),
+           control.predictor = list(
+               A = inla.stack.A(StackFit.WR)))    
+ 
+ 
+ c(IM2$dic$dic, IM4$dic$dic) # keep depth:substratum
+c(IM2$waic$waic, IM4$waic$waic) 
+ 
+ 
+
+```
+
+
+
+### Prior predictive simulation
+```{r}
+
+N<- nrow(dat.WRXm)
+X<- data.frame(Intercept                      = rep(1, N),
+              depth                       = dat.WRXm[,1],
+              Substratum1cob_boulder       = dat.WRXm[,2],
+              Substratum1gravel            = dat.WRXm[,3],
+              Substratum1mud               = dat.WRXm[,4],
+              Substratum1muddy_sand        = dat.WRXm[,5],
+              Substratum1rock              = dat.WRXm[,6],
+              Substratum1sand              = dat.WRXm[,7],
+              Year2023                     = dat.WRXm[,8],
+              depth.Substratum1gravel      = dat.WRXm[,9],
+              depth.Substratum1mud         = dat.WRXm[,10],
+              depth.Substratum1muddy_sand  = dat.WRXm[,11],
+              depth.Substratum1rock        = dat.WRXm[,12],
+              depth.Substratum1sand        = dat.WRXm[,13], 
+              depth.Year2023               = dat.WRXm[,14])
+
+
+
+f2<- y ~ -1 + Intercept + depth + Substratum1cob_boulder  +  
+              Substratum1gravel            +
+              Substratum1mud               +
+              Substratum1muddy_sand       +
+              Substratum1rock             +
+              Substratum1sand + 
+              Year2023+
+              depth.Substratum1gravel   +   
+              depth.Substratum1mud        + 
+              depth.Substratum1muddy_sand  +
+              depth.Substratum1rock       +
+              depth.Substratum1sand  + 
+              depth.Year2023  +           
+               f(w, model = spde)#
+
+
+
+IM2<- inla(f2,
+           family = 'binomial',
+           data= inla.stack.data(StackFit.WR),
+           control.predictor = list(
+               A = inla.stack.A(StackFit.WR)))
+
+inla.set.control.fixed.default(IM2)
+
+ 
+## model interpretation
+
+out2<- IM2$summary.fixed
+
+
+# Assuming logistic() is defined as:
+logistic <- function(x) 1 / (1 + exp(-x))
+
+
+
+out2
+# prior sim
+
+
+######################################################## My priors ##############################
+
+
+mean_inter= -0.3
+  sd_inter = 0.5
+  mean = 0  # Prior mean for all fixed effects ---- here if we move to say -0.5 then it reduces the mean below 0 assuming less than 50% probability of seeing one
+ sd = 0.01 # SD for prior
+  mean_yr = 0
+ sd_year = 0.05  
+sd_depth=0.03
+
+
+sims=300
+outD<- out2
+outD[1,1]<- mean_inter
+outD[1,2]<- sd_inter
+outD[c(2:15),1]<- mean
+outD[c(2:15),2]<- sd
+outD[9,2]<- sd_year
+outD[2,2]<- sd_depth
+outD
+
+
+###############################################################
+
+##mean depth
+x.hat<- mean(met.dat.SWR.T$depth)
+#x.hat< -60
+################### some trial plots from these coefs 
+plot(NA, ylim=c(-0.1, 1.1), xlim=c(0.5,6.5), ylab='Probability of presence', xlab ='Substratum', yaxt='n', xaxt='n')
+axis(1, at= c(1,2,3,4,5,6), labels = levels(met.dat.SWR.T$Substratum1))
+axis(2, at= c(0,0.5, 1), labels = c(0,0.5, 1), las=2)
+
+
+## 2022
+loc_2022 <- seq(1-0.2, 6-0.2, by = 1) # x-positions for substrata
+depth_sub_inter<- c(0, outD[10,1], outD[11,1], outD[12,1], outD[13,1], outD[14,1])
+depth_sub_inter_lo<- c(0, outD[10,3], outD[11,3], outD[12,3], outD[13,3], outD[14,3])
+depth_sub_inter_up<- c(0, outD[10,5], outD[11,5], outD[12,5], outD[13,5], outD[14,5])
+depth_sub_inter_sd<- c(0, outD[10,2], outD[11,2], outD[12,2], outD[13,2], outD[14,2])
+
+
+# Function to draw logistic regression error ###leave this until I sort out priors
+
+ for (i in 1:6){
+
+  # Draw multiple points based on parameter uncertainties
+  for (j in 1:sims) {
+    # Sample intercept and slope from their distributions
+    sampled_intercept <- rnorm(1, mean = outD[1,1], sd = outD[1,2])
+    sampled_seabed <- rnorm(1, mean = outD[i+2,1], sd = outD[i+2,2])
+    sampled_depth <- rnorm(1, mean = outD[2,1], sd = outD[2,2]) *x.hat
+    sampled_inter <- rnorm(1, mean= depth_sub_inter[i], sd= depth_sub_inter_sd[i])*x.hat
+   points( jitter(loc_2022[i], amount=0.1), logistic(sampled_intercept + sampled_seabed + sampled_depth + sampled_inter), col = adjustcolor('seagreen', alpha.f=0.5), pch=19, cex=0.7)
+  }
+   
+ 
+ } 
+
+
+
+
+## 2023
+loc_2023 <- seq(1, 6, by = 1) # x-positions for substrata
+depth_sub_inter<- c(0, outD[10,1], outD[11,1], outD[12,1], outD[13,1], outD[14,1])
+depth_sub_inter_lo<- c(0, outD[10,3], outD[11,3], outD[12,3], outD[13,3], outD[14,3])
+depth_sub_inter_up<- c(0, outD[10,5], outD[11,5], outD[12,5], outD[13,5], outD[14,5])
+depth_sub_inter_sd<- c(0, outD[10,2], outD[11,2], outD[12,2], outD[13,2], outD[14,2])
+
+
+
+# Function to draw logistic regression error - leave until priors are sorted
+ for (i in 1:6){
+
+  # Draw multiple points based on parameter uncertainties
+  for (j in 1:sims) {
+    # Sample intercept and slope from their distributions
+    sampled_intercept <- rnorm(1, mean = outD[1,1], sd = outD[1,2])
+    sampled_seabed <- rnorm(1, mean = outD[i+2,1], sd = outD[i+2,2])
+    sampled_depth <- rnorm(1, mean = outD[2,1], sd = outD[2,2]) *x.hat
+    sampled_inter <- rnorm(1, mean= depth_sub_inter[i], sd= depth_sub_inter_sd[i])*x.hat
+    sampled_year <- rnorm(1, mean= outD[9,1], sd= outD[9,2])
+    sampled_depth_yr<- rnorm(1, mean= outD[15,1], sd= outD[15,2])*x.hat
+   points( jitter(loc_2023[i], amount=0.1), logistic(sampled_intercept + sampled_seabed + sampled_depth + sampled_inter + sampled_year+ sampled_depth_yr), col = adjustcolor('mediumseagreen', alpha.f=0.5), pch=19, cex=0.7)
+  }
+   
+ 
+ } 
+
+
+
+
+
+```
+
+
+### Prediction
+```{r}
+
+N<- nrow(dat.WRXm)
+X<- data.frame(Intercept                      = rep(1, N),
+              depth                       = dat.WRXm[,1],
+              Substratum1cob_boulder       = dat.WRXm[,2],
+              Substratum1gravel            = dat.WRXm[,3],
+              Substratum1mud               = dat.WRXm[,4],
+              Substratum1muddy_sand        = dat.WRXm[,5],
+              Substratum1rock              = dat.WRXm[,6],
+              Substratum1sand              = dat.WRXm[,7],
+              Year2023                     = dat.WRXm[,8],
+              depth.Substratum1gravel      = dat.WRXm[,9],
+              depth.Substratum1mud         = dat.WRXm[,10],
+              depth.Substratum1muddy_sand  = dat.WRXm[,11],
+              depth.Substratum1rock        = dat.WRXm[,12],
+              depth.Substratum1sand        = dat.WRXm[,13], 
+              depth.Year2023               = dat.WRXm[,14])
+
+
+
+f2<- y ~ -1 + Intercept + depth + Substratum1cob_boulder  +  
+              Substratum1gravel            +
+              Substratum1mud               +
+              Substratum1muddy_sand       +
+              Substratum1rock             +
+              Substratum1sand + 
+              Year2023+
+              depth.Substratum1gravel   +   
+              depth.Substratum1mud        + 
+              depth.Substratum1muddy_sand  +
+              depth.Substratum1rock       +
+              depth.Substratum1sand  + 
+              depth.Year2023  +           
+               f(w, model = spde)#
+
+
+
+
+mean_inter= -0.3
+  sd_inter = 0.5
+  mean = 0  # Prior mean for all fixed effects ---- here if we move to say -0.5 then it reduces the mean below 0 assuming less than 50% probability of seeing one
+ sd = 0.05 # SD for prior
+  mean_yr = 0
+ sd_year = 0.05   
+sd_depth=0.03
+
+
+
+
+IMp<- inla(f2,
+           family = 'binomial',
+           data= inla.stack.data(StackFit.WR),
+           control.compute = list(config= TRUE),
+           control.predictor = list(
+               A = inla.stack.A(StackFit.WR)),
+           control.fixed = list(
+            mean = list(Intercept = -0.3, default=0),  # Prior mean for all fixed effects
+            prec = list(Intercept = prec(0.5) , default=prec(0.05), Year2023=prec(0.05), depth=prec(0.03) ) # Prior precision (1 / variance)
+           ))
+
+
+## model interpretation
+
+out2<- IMp$summary.fixed
+
+print(out2, digits=2)
+
+
+# effect of depth across years and substrata
+
+
+
+
+##mean depth
+x.hat<- mean(met.dat.SWR.T$depth)
+x.hat=-30
+################### some trial plots from these coefs 
+plot(NA, ylim=c(-0.1, 1.1), xlim=c(0.5,6.5), ylab='Probability of presence', xlab ='Substratum', yaxt='n', xaxt='n')
+axis(1, at= c(1,2,3,4,5,6), labels = levels(met.dat.SWR.T$Substratum1))
+axis(2, at= c(0,0.5, 1), labels = c(0,0.5, 1), las=2)
+# Assuming logistic() is defined as:
+logistic <- function(x) 1 / (1 + exp(-x))
+
+## 2022
+loc_2022 <- seq(1-0.2, 6-0.2, by = 1) # x-positions for substrata
+depth_sub_inter<- c(0, out2[10,1], out2[11,1], out2[12,1], out2[13,1], out2[14,1])
+depth_sub_inter_lo<- c(0, out2[10,3], out2[11,3], out2[12,3], out2[13,3], out2[14,3])
+depth_sub_inter_up<- c(0, out2[10,5], out2[11,5], out2[12,5], out2[13,5], out2[14,5])
+depth_sub_inter_sd<- c(0, out2[10,2], out2[11,2], out2[12,2], out2[13,2], out2[14,2])
+
+
+for (i in 1:6){
+  
+points(loc_2022[i], logistic(out2[1,1]+ out2[i+2,1] + out2[2,1]*x.hat + depth_sub_inter[i]*x.hat), pch=19, cex=2.5)
+arrows(loc_2022[i], logistic(out2[1,3]+ out2[i+2,3] +out2[2,3]*x.hat + depth_sub_inter_lo[i]*x.hat), loc_2022[i], logistic(out2[1,5]+out2[i+2,5]+ out2[2,5]*x.hat + depth_sub_inter_up[i]*x.hat), angle=90, length=0.1, lwd=2.5, code=3)
+
+  
+}
+
+# Function to draw logistic regression error 
+samps=100
+ for (i in 1:6){
+
+  # Draw multiple points based on parameter uncertainties
+  for (j in 1:samps) {
+    # Sample intercept and slope from their distributions
+    sampled_intercept <- rnorm(1, mean = out2[1,1], sd = out2[1,2])
+    sampled_seabed <- rnorm(1, mean = out2[i+2,1], sd = out2[i+2,2])
+    sampled_depth <- rnorm(1, mean = out2[2,1], sd = out2[2,2]) *x.hat
+    sampled_inter <- rnorm(1, mean= depth_sub_inter[i], sd= depth_sub_inter_sd[i])*x.hat
+   points( jitter(loc_2022[i], amount=0.1), logistic(sampled_intercept + sampled_seabed + sampled_depth + sampled_inter), col = adjustcolor('black', alpha.f=0.5), pch=19, cex=0.7)
+  }
+   
+ 
+ } 
+
+
+
+
+## 2023
+loc_2023 <- seq(1, 6, by = 1) # x-positions for substrata
+depth_sub_inter<- c(0, out2[10,1], out2[11,1], out2[12,1], out2[13,1], out2[14,1])
+depth_sub_inter_lo<- c(0, out2[10,3], out2[11,3], out2[12,3], out2[13,3], out2[14,3])
+depth_sub_inter_up<- c(0, out2[10,5], out2[11,5], out2[12,5], out2[13,5], out2[14,5])
+depth_sub_inter_sd<- c(0, out2[10,2], out2[11,2], out2[12,2], out2[13,2], out2[14,2])
+
+
+
+for (i in 1:6){
+
+points(loc_2023[i], logistic(out2[1,1]+ out2[i+2,1] + out2[2,1]*x.hat + depth_sub_inter[i]*x.hat+
+                               out2[9,1]+ out2[15,1]*x.hat), pch=19, cex=2.5, col='grey60')
+  
+  
+arrows(loc_2023[i], logistic(out2[1,3]+ out2[i+2,3] +out2[2,3]*x.hat + depth_sub_inter_lo[i]*x.hat + out2[9,3]+ out2[15,3]*x.hat), loc_2023[i], logistic(out2[1,5]+out2[i+2,5]+out2[2,5]*x.hat+ depth_sub_inter_up[i]*x.hat + out2[9,5]+ out2[15,5]*x.hat), angle=90, length=0.1, lwd=2.5, code=3, col='grey60')
+
+  
+}
+
+
+# Function to draw logistic regression error - leave until priors are sorted
+samps=100
+ for (i in 1:6){
+
+  # Draw multiple points based on parameter uncertainties
+  for (j in 1:samps) {
+    # Sample intercept and slope from their distributions
+    sampled_intercept <- rnorm(1, mean = out2[1,1], sd = out2[1,2])
+    sampled_seabed <- rnorm(1, mean = out2[i+2,1], sd = out2[i+2,2])
+    sampled_depth <- rnorm(1, mean = out2[2,1], sd = out2[2,2]) *x.hat
+    sampled_inter <- rnorm(1, mean= depth_sub_inter[i], sd= depth_sub_inter_sd[i])*x.hat
+    sampled_year <- rnorm(1, mean= out2[9,1], sd= out2[9,2])
+    sampled_depth_yr<- rnorm(1, mean= out2[15,1], sd= out2[15,2])*x.hat
+   points( jitter(loc_2023[i], amount=0.1), logistic(sampled_intercept + sampled_seabed + sampled_depth + sampled_inter + sampled_year+ sampled_depth_yr), col = adjustcolor('grey60', alpha.f=0.5), pch=19, cex=0.7)
+  }
+   
+ 
+ } 
+
+
+
+
+
+
+
+## thornback ray
+ Sim<- inla.posterior.sample(n=1, result= IMp)
+
+ names(Sim[[1]])
+ Sim[[1]]$latent
+ Sim[[1]]$hyperpar
+ Sim[[1]]$logdens
+ length(Sim[[1]]$latent)
+
+  Sim[[1]]$latent[3350:3364]
+
+ row.names(Sim[[1]]$latent)[3350:3364]
+ dim(Sim[[1]]$latent)
+# 
+ Sim[[1]]$latent[3367:3381,]
+
+
+ 
+ rownum<- as.numeric(c(3367:3381))
+ 
+ Sim[[1]]$latent[c(1364:3366),]
+ 
+ Betas <- Sim[[1]]$latent[rownum]
+# 
+# 
+
+
+ wk<- Sim[[1]]$latent[1364:3366,]
+ 
+ head(X)
+ Xm <- as.matrix(X)
+ 
+ Am <- as.matrix(A1.wr)
+
+ 
+ FixedPart   <- Xm %*% Betas
+ SpatialPart <- Am %*% wk
+# 
+# 
+ mu   <- logistic(FixedPart + SpatialPart)
+
+ Ysim <- rbinom(n = N, size=1, prob =   mu)
+ Ysim
+
+ head(met.dat.SWR.T)
+ new<- cbind(met.dat.SWR.T, Ysim, dat.wr$pres.ab.Thornback)
+ head(new)
+ names(new)[13]<- 'truth'
+ 
+ 
+ new$Substratum1<- as.factor(new$Substratum1)
+ new22<- subset(new, new$Year=='2022')
+new23<- subset(new, new$Year=='2023')
+ 
+
+ 
+points(jitter(as.numeric(new22$Substratum1)-0.2, amount= 0.1), jitter(new22$truth, amount=0.05) , pch=19, cex=0.8, col='firebrick4')
+   
+points(jitter(as.numeric(new23$Substratum1), amount = 0.1), jitter(new23$truth, amount=0.05) , pch=19, cex=0.8, col='firebrick1')
+
+
+ points(jitter(as.numeric(new22$Substratum1)-0.2, amount=0.1), jitter(new22$Ysim, amount=0.05), pch=19, cex=0.8, col='cadetblue4')
+   
+ points(jitter(as.numeric(new23$Substratum1), amount=0.1), jitter(new23$Ysim, amount=0.05), pch=19, cex=0.8, col='cadetblue1')
+
+
+########################################### show random field for spatial ##########
+
+# Plot the spatial random field
+# Get the posterior mean of the spatial field at the mesh points:
+w.pm <- logistic(IMp$summary.random$w$mean)  
+w.sd <- logistic(IMp$summary.random$w$sd)
+length(w.pm)  #mu.srf
+# This is the spatial field calculated at all the mesh points
+
+
+# Now we calculate the spatial field on a grid. 
+wproj <- inla.mesh.projector(mesh.3.wr, dims=c(1000,1000))   
+
+w.pm100_100 <- inla.mesh.project(wproj, w.pm)
+w.sd100_100 <- inla.mesh.project(wproj, w.sd)
+
+# This w.pm100_100 is of dimension 100 by 100 
+# and is a projection (interpolation and extrapolation) 
+# of the random field w. We can use the levelplot 
+# function from the lattice package to plot w.pm100_100
+
+Grid <- expand.grid(Xkm = wproj$x, 
+                    Ykm = wproj$y)
+Grid$w.pm <- as.vector(w.pm100_100)    
+Grid$w.sd <- as.vector(w.sd100_100)               
+
+col.r <- rev(rainbow(30, alpha = 0.35))
+u.proj <-  inla.mesh.projector(mesh.3.wr, loc= coords.wr)
+u.mean<- inla.mesh.project(u.proj, IMp$summary.random$w$mean)
+
+plot(u.mean)
+
+
+wr.coast<- data.frame(st_coordinates(shore.wr)[,1:2]/1000)
+plot(wr.coast[,1], wr.coast[,2])
+
+levelplot(w.pm ~ Xkm * Ykm,add=T,
+          col.regions = col.r,
+          data = Grid, 
+          scales = list(draw = TRUE),
+          xlab = list("X-coordinates (km)", cex = 1.5),
+          ylab = list("Y-coordinates (km)", cex = 1.5),
+          main = list("Posterior mean spatial random field", cex = 1.5),
+          panel = function(...) {
+            panel.levelplot(...)  # Default levelplot
+            panel.points(wr.coast[,1], wr.coast[,2], pch = 16, col = "black", cex = 0.2)
+            panel.points(coords.wr[,1], coords.wr[,2], pch = 19, col = "black", cex = 0.5)  # Add points  # Add points
+          })
+
+
+
+levelplot(w.sd ~ Xkm * Ykm,
+          col.regions = col.r,
+          data = Grid, 
+          scales = list(draw = TRUE),
+          xlab = list("X-coordinates (km)", cex = 1.5),
+          ylab = list("Y-coordinates (km)", cex = 1.5),
+          main = list("Posterior sd spatial random field", cex = 1.5),
+          panel = function(...) {
+            panel.levelplot(...)  # Default levelplot
+            panel.points(wr.coast[,1], wr.coast[,2], pch = 16, col = "black", cex = 0.2)
+            panel.points(coords.wr[,1], coords.wr[,2], pch = 19, col = "black", cex = 0.5)  # Add points  # Add points
+          }) 
+ 
+ 
+
+
+
+```
+
+
+
+
+## INLA-SPDE approach Eriboll Thornback - model selection
+```{r}
+
+
+## random intercept with spatial correlation
+
+spde <- inla.spde2.matern(mesh.2.er, alpha = 2)
+
+
+## define spatial field
+
+w.index<- inla.spde.make.index(name='w', n.spde = spde$n.spde, n.group = 1, n.repl = 1)
+
+## define stack
+
+# start with model covariates
+met.dat.Ser.T$Substratum1<- as.factor(met.dat.Ser.T$Substratum1)
+levels(met.dat.Ser.T$Substratum1)
+head(met.dat.Ser.T)
+str(met.dat.Ser.T)
+
+met.dat.Ser.T$Year<- as.factor(met.dat.Ser.T$Year)
+
+
+dat.ERXm<- model.matrix( ~  -1+ depth +  Substratum1 + Year+ 
+                             depth:Substratum1 + depth:Year +
+                             Substratum1:Year,
+                         data=met.dat.Ser.T) 
+colnames(dat.ERXm)
+
+
+
+X<- data.frame(depth                       = dat.ERXm[,1],
+              Substratum1cob_boulder       = dat.ERXm[,2],
+              Substratum1gravel            = dat.ERXm[,3],
+              Substratum1mud               = dat.ERXm[,4],
+              Substratum1muddy_sand        = dat.ERXm[,5],
+              Substratum1rock              = dat.ERXm[,6],
+              Substratum1sand              = dat.ERXm[,7],
+              Year2022                     = dat.ERXm[,8],
+              Year2023                     = dat.ERXm[,9],
+              depth.Substratum1gravel      = dat.ERXm[,10],
+              depth.Substratum1mud         = dat.ERXm[,11],
+              depth.Substratum1muddy_sand  = dat.ERXm[,12],
+              depth.Substratum1rock        = dat.ERXm[,13],
+              depth.Substratum1sand        = dat.ERXm[,14], 
+              depth.Year2022               = dat.ERXm[,15],
+              depth.Year2023               = dat.ERXm[,16],
+              Substratum1gravel.Year2022   = dat.ERXm[,17],
+              Substratum1mud.Year2022      = dat.ERXm[,18],
+              Substratum1muddy_sand.Year2022  = dat.ERXm[,19],
+              Substratum1rock.Year2022    = dat.ERXm[,20],
+              Substratum1sand.Year2022     = dat.ERXm[,21],
+               Substratum1gravel.Year2023   = dat.ERXm[,22],
+              Substratum1mud.Year2023      = dat.ERXm[,23],
+              Substratum1muddy_sand.Year2023  = dat.ERXm[,24],
+              Substratum1rock.Year2023    = dat.ERXm[,25],
+              Substratum1sand.Year2023     = dat.ERXm[,26]    )
+
+
+N <- nrow(dat.ERXm)
+
+
+
+y.Th<- dat.erT$pres.ab.Thornback
+
+
+
+
+StackFit.ER<- inla.stack(
+                      tag= 'Fit',
+                      data=list(y=y.Th),
+                      A = list(1, 1, A1.er),
+                      effects = list(
+                        Intercept = rep(1,N),
+                        X=X,
+                        W = w.index))
+
+
+# define formula for spatial model similar to above
+
+f1<- y ~ -1 + Intercept + 
+              depth                       +
+              Substratum1cob_boulder       +
+              Substratum1gravel            +
+              Substratum1mud               +
+              Substratum1muddy_sand       +
+              Substratum1rock             +
+              Substratum1sand             +
+              Year2022                    +
+              Year2023                    +
+              depth.Substratum1gravel     +
+              depth.Substratum1mud        +
+              depth.Substratum1muddy_sand  +
+              depth.Substratum1rock        +
+              depth.Substratum1sand        + 
+              depth.Year2022               +
+              depth.Year2023              +
+              Substratum1gravel.Year2022   +
+              Substratum1mud.Year2022      +
+              Substratum1muddy_sand.Year2022 +
+              Substratum1rock.Year2022    +
+              Substratum1sand.Year2022     +
+               Substratum1gravel.Year2023   +
+              Substratum1mud.Year2023     +
+              Substratum1muddy_sand.Year2023 +
+              Substratum1rock.Year2023    +
+              Substratum1sand.Year2023     +   f(w, model = spde)# with spatial element and interaction
+  
+f2<- y ~ -1 + Intercept + 
+              depth                       +
+              Substratum1cob_boulder       +
+              Substratum1gravel            +
+              Substratum1mud               +
+              Substratum1muddy_sand       +
+              Substratum1rock             +
+              Substratum1sand             +
+              Year2022                    +
+              Year2023                    +
+              depth.Substratum1gravel     +
+              depth.Substratum1mud        +
+              depth.Substratum1muddy_sand  +
+              depth.Substratum1rock        +
+              depth.Substratum1sand        + 
+              depth.Year2022               +
+              depth.Year2023              +
+               f(w, model = spde)# remove substratum:year
+
+
+
+
+
+IM1<- inla(f1,
+           family = 'binomial',
+           data= inla.stack.data(StackFit.ER),
+           control.compute = list(
+               dic=TRUE,
+               waic=TRUE),
+           control.predictor = list(
+               A = inla.stack.A(StackFit.ER)))
+
+IM2<- inla(f2,
+           family = 'binomial',
+           data= inla.stack.data(StackFit.ER),
+           control.compute = list(
+               dic=TRUE,
+               waic=TRUE),
+           control.predictor = list(
+               A = inla.stack.A(StackFit.ER)))
+
+
+c(IM1$dic$dic, IM2$dic$dic)
+c(IM1$waic$waic, IM2$waic$waic) ## drop substratum year
+
+f3<- y ~ -1 + Intercept + 
+              depth                       +
+              Substratum1cob_boulder       +
+              Substratum1gravel            +
+              Substratum1mud               +
+              Substratum1muddy_sand       +
+              Substratum1rock             +
+              Substratum1sand             +
+              Year2022                    +
+              Year2023                    +
+              depth.Substratum1gravel     +
+              depth.Substratum1mud        +
+              depth.Substratum1muddy_sand  +
+              depth.Substratum1rock        +
+              depth.Substratum1sand        + 
+             
+               f(w, model = spde)# remove year:depth
+
+
+
+
+IM3<- inla(f3,
+           family = 'binomial',
+           data= inla.stack.data(StackFit.ER),
+           control.compute = list(
+               dic=TRUE,
+               waic=TRUE),
+           control.predictor = list(
+               A = inla.stack.A(StackFit.ER)))
+
+c(IM2$dic$dic, IM3$dic$dic)
+c(IM2$waic$waic, IM3$waic$waic) ## so no need for year: depth
+  
+
+
+ f4<- y ~ -1 + Intercept + 
+              depth                       +
+              Substratum1cob_boulder       +
+              Substratum1gravel            +
+              Substratum1mud               +
+              Substratum1muddy_sand       +
+              Substratum1rock             +
+              Substratum1sand             +
+             
+              depth.Substratum1gravel     +
+              depth.Substratum1mud        +
+              depth.Substratum1muddy_sand  +
+              depth.Substratum1rock        +
+              depth.Substratum1sand        + 
+             
+               f(w, model = spde)# remove year    
+                
+ 
+ IM4<- inla(f4,
+           family = 'binomial',
+           data= inla.stack.data(StackFit.ER),
+           control.compute = list(
+               dic=TRUE,
+               waic=TRUE),
+           control.predictor = list(
+               A = inla.stack.A(StackFit.ER)))    
+ 
+ 
+c(IM3$dic$dic, IM4$dic$dic)
+c(IM3$waic$waic, IM4$waic$waic) ## so model without year is better
+
+f5<- y ~ -1 + Intercept + 
+              depth                       +
+              Substratum1cob_boulder       +
+              Substratum1gravel            +
+              Substratum1mud               +
+              Substratum1muddy_sand       +
+              Substratum1rock             +
+              Substratum1sand             +
+             
+                            f(w, model = spde)# remove substratum:depth    
+                
+ 
+ IM5<- inla(f5,
+           family = 'binomial',
+           data= inla.stack.data(StackFit.ER),
+           control.compute = list(
+               dic=TRUE,
+               waic=TRUE),
+           control.predictor = list(
+               A = inla.stack.A(StackFit.ER)))    
+ 
+ 
+c(IM4$dic$dic, IM5$dic$dic)
+c(IM4$waic$waic, IM5$waic$waic) ## so model 4 is best
+ 
+
+
+```
+
+
+### Prior predictive simulation
+```{r}
+
+N<- nrow(dat.ERXm)
+head(dat.ERXm)
+X<- data.frame(Intercept                      = rep(1, N),
+              depth                       = dat.ERXm[,1],
+              Substratum1cob_boulder       = dat.ERXm[,2],
+              Substratum1gravel            = dat.ERXm[,3],
+              Substratum1mud               = dat.ERXm[,4],
+              Substratum1muddy_sand        = dat.ERXm[,5],
+              Substratum1rock              = dat.ERXm[,6],
+              Substratum1sand              = dat.ERXm[,7],
+              depth.Substratum1gravel   = dat.ERXm[,10],
+              depth.Substratum1mud      = dat.ERXm[,11],
+              depth.Substratum1muddy_sand  = dat.ERXm[,12],
+              depth.Substratum1rock    = dat.ERXm[,13],
+              depth.Substratum1sand     = dat.ERXm[,14]   )
+
+
+
+f4<- y ~ -1 + Intercept + 
+              depth                       +
+              Substratum1cob_boulder       +
+              Substratum1gravel            +
+              Substratum1mud               +
+              Substratum1muddy_sand       +
+              Substratum1rock             +
+              Substratum1sand             +
+             
+              depth.Substratum1gravel     +
+              depth.Substratum1mud        +
+              depth.Substratum1muddy_sand  +
+              depth.Substratum1rock        +
+              depth.Substratum1sand        + 
+             
+               f(w, model = spde)
+ 
+
+   
+    
+IM4<- inla(f4,
+           family = 'binomial',
+           data= inla.stack.data(StackFit.ER),
+           control.predictor = list(
+               A = inla.stack.A(StackFit.ER)))
+
+inla.set.control.fixed.default(IM4)
+
+ 
+## model interpretation
+
+out4<- IM4$summary.fixed
+
+
+# Assuming logistic() is defined as:
+logistic <- function(x) 1 / (1 + exp(-x))
+
+
+
+out4
+# prior sim
+
+
+######################################################## My priors ##############################
+
+
+
+mean_inter= -0.5
+  sd_inter = 0.05
+  mean = 0  # Prior mean for all fixed effects ---- here if we move to say -0.5 then it reduces the mean below 0 assuming less than 50% probability of seeing one
+ sd = 0.05 # SD for prior
+sd_depth=0.05
+
+
+sims=300
+outD<- out4
+outD[1,1]<- mean_inter
+outD[1,2]<- sd_inter
+outD[c(2:13),1]<- mean
+outD[c(2:13),2]<- sd
+outD[2,2]<- sd_depth
+outD
+
+
+##mean depth
+x.hat<- mean(met.dat.Ser.T$depth)
+#x.hat< -60
+################### some trial plots from these coefs 
+plot(NA, ylim=c(-0.1, 1.1), xlim=c(0.5,6.5), ylab='Probability of presence', xlab ='Substratum', yaxt='n', xaxt='n')
+axis(1, at= c(1,2,3,4,5,6), labels = levels(met.dat.Ser.T$Substratum1))
+axis(2, at= c(0,0.5, 1), labels = c(0,0.5, 1), las=2)
+
+
+
+# Function to draw logistic regression error
+
+run<- 'one'
+inter_coef<- c(0, outD[9, 1], outD[10, 1], outD[11, 1], outD[12, 1], outD[13, 1])
+inter_coef_sd<- c(0, outD[9, 2], outD[10, 2], outD[11, 2], outD[12, 2], outD[13, 2])
+
+## 2022
+loc_2022 <- seq(1, 6, by = 1) # x-positions for substrata
+
+ for (i in 1:6){
+
+  # Draw multiple points based on parameter uncertainties
+  for (j in 1:sims) {
+    # Sample intercept and slope from their distributions
+    sampled_intercept <- rnorm(1, mean = outD[1,1], sd = outD[1,2])
+    sampled_seabed <- rnorm(1, mean = outD[i+2,1], sd = outD[i+2,2])
+    sampled_depth <- rnorm(1, mean = outD[2,1], sd = outD[2,2]) *x.hat
+    sampled_interact <- rnorm(1, mean = inter_coef[i], inter_coef_sd[i])
+    if(run == 'one' ){
+   points( jitter(loc_2022[i], amount=0.1), logistic(sampled_intercept + sampled_seabed + sampled_depth), col = adjustcolor('mediumseagreen', alpha.f=0.5), pch=19, cex=0.7)
+    } else {
+      run <- 'next'
+      points( jitter(loc_2022[i], amount=0.1), logistic(sampled_intercept + sampled_seabed + sampled_depth + sampled_interact), col = adjustcolor('mediumseagreen', alpha.f=0.5), pch=19, cex=0.7)
+    }
+  
+ } }
+
+
+
+```
+
+
+
+###Prediction
+```{r}
+## model interpretation
+
+
+N<- nrow(dat.ERXm)
+head(dat.ERXm)
+X<- data.frame(Intercept                      = rep(1, N),
+              depth                       = dat.ERXm[,1],
+              Substratum1cob_boulder       = dat.ERXm[,2],
+              Substratum1gravel            = dat.ERXm[,3],
+              Substratum1mud               = dat.ERXm[,4],
+              Substratum1muddy_sand        = dat.ERXm[,5],
+              Substratum1rock              = dat.ERXm[,6],
+              Substratum1sand              = dat.ERXm[,7],
+              depth.Substratum1gravel   = dat.ERXm[,10],
+              depth.Substratum1mud      = dat.ERXm[,11],
+              depth.Substratum1muddy_sand  = dat.ERXm[,12],
+              depth.Substratum1rock    = dat.ERXm[,13],
+              depth.Substratum1sand     = dat.ERXm[,14]   )
+
+
+
+
+
+f4<- y ~ -1 + Intercept + 
+              depth                       +
+              Substratum1cob_boulder       +
+              Substratum1gravel            +
+              Substratum1mud               +
+              Substratum1muddy_sand       +
+              Substratum1rock             +
+              Substratum1sand             +
+             
+              depth.Substratum1gravel     +
+              depth.Substratum1mud        +
+              depth.Substratum1muddy_sand  +
+              depth.Substratum1rock        +
+              depth.Substratum1sand        + 
+             
+               f(w, model = spde)
+ 
+
+
+mean_inter= -0.5
+  sd_inter = 0.05
+  mean = 0  # Prior mean for all fixed effects ---- here if we move to say -0.5 then it reduces the mean below 0 assuming less than 50% probability of seeing one
+ sd = 0.05 # SD for prior
+sd_depth=0.05
+
+
+
+ IMp<- inla(f4,
+           family = 'binomial',
+           data= inla.stack.data(StackFit.ER),
+            control.compute = list(config= TRUE),
+           control.predictor = list(
+               A = inla.stack.A(StackFit.ER)),
+           control.fixed = list(
+            mean = list(Intercept =-0.5, default = 0),  # Prior mean for all fixed effects
+            prec = list(Intercept =prec(0.05) , default=prec(0.05), depth=prec(0.05)) # Prior precision (1 / variance)
+           ))
+
+out4<- IMp$summary.fixed
+
+print(out4, digits=2)
+
+##########
+
+# Logistic function definition
+logistic <- function(x) 1 / (1 + exp(-x))
+##mean depth
+x.hat<- -25
+################### some trial plots from these coefs 
+plot(NA, ylim=c(-0.1, 1.1), xlim=c(0.5,6.5), ylab='Probability of presence', xlab ='Substratum', yaxt='n', xaxt='n')
+axis(1, at= c(1,2,3,4,5,6), labels = levels(met.dat.Ser.T$Substratum1))
+axis(2, at= c(0,0.5, 1), labels = c(0,0.5, 1), las=2)
+############################ 
+
+
+
+loc <- seq(1, 6, by = 1) # x-positions for substrata
+int_par<- c( 0, out4[9,1], out4[10,1], out4[11,1], out4[12,1], out4[13,1])
+int_par_sd<- c( 0, out4[9,2], out4[10,2], out4[11,2], out4[12,2], out4[13,2])
+int_par_lo<- c( 0, out4[9,3], out4[10,3], out4[11,3], out4[12,3], out4[13,3])
+int_par_up<- c( 0, out4[9,5], out4[10,5], out4[11,5], out4[12,5], out4[13,5])
+
+
+for (i in 1:6){
+  
+points(loc[i], logistic(out4[1,1] + out4[i+2,1] + out4[2,1]*x.hat + int_par[i]*x.hat), pch=19, cex=2.5)
+arrows(loc[i], logistic(out4[1,3] + out4[i+2,3] + out4[2,3]*x.hat + int_par_lo[i]*x.hat), loc[i], logistic(out4[1,5] + out4[i+2,5] + out4[2,5]* x.hat+ int_par_up[i]*x.hat), angle=90, length=0.1, lwd=2.5, code=3)
+
+ 
+}
+
+# Function to draw logistic regression error 
+samps=100
+ for (i in 1:6){
+
+  # Draw multiple points based on parameter uncertainties
+  for (j in 1:samps) {
+    # Sample intercept and slope from their distributions
+    sampled_intercept <- rnorm(1, mean = out4[1,1], sd = out4[1,2])
+    sampled_seabed <- rnorm(1, mean = out4[i+2,1], sd = out4[i+2,2])
+    sampled_depth <- rnorm(1, mean = out4[2,1], sd = out4[2,2]) *x.hat
+    sampled_inter <- rnorm(1, mean = int_par[i], sd=int_par_sd[i])
+   points( jitter(loc[i], amount=0.1), logistic(sampled_intercept + sampled_seabed + sampled_depth), col = adjustcolor('black', alpha.f=0.5), pch=19, cex=0.7)
+  }
+   
+  } 
+
+
+
+
+
+# 
+ Sim<- inla.posterior.sample(n=1, result= IMp)
+
+ names(Sim[[1]])
+ Sim[[1]]$latent
+ Sim[[1]]$hyperpar
+ Sim[[1]]$logdens
+ length(Sim[[1]]$latent)
+
+ row.names(Sim[[1]]$latent)[3160:3172]
+ 
+
+ 
+ rownum<- as.numeric(c(3160:3172))
+ 
+ #Sim[[1]]$latent[c(3353,3354),]
+ 
+ Betas <- Sim[[1]]$latent[rownum]
+
+ 
+# just look for 
+Sim[[1]]$latent[1616,]
+Sim[[1]]$latent[3159,]
+
+ wk<- Sim[[1]]$latent[1616:3159,]
+ 
+ head(X)
+ Xm <- as.matrix(X)
+ 
+ Am <- as.matrix(A1.er)
+
+ 
+ FixedPart   <- Xm %*% Betas
+ SpatialPart <- Am %*% wk
+# 
+# 
+ mu   <- logistic(FixedPart + SpatialPart)
+
+ Ysim <- rbinom(n = N, size=1, prob =   mu)
+ Ysim
+
+ head(dat.er)
+ new<- cbind(met.dat.er, Ysim, dat.er$pres.ab.Thornback)
+ head(new)
+ names(new)[14]<- 'truth'
+ 
+ 
+ new$Substratum1<- as.factor(new$Substratum1)
+ 
+ 
+
+points(jitter(as.numeric(new$Substratum1), amount=0.1), jitter(new$truth, amount=0.05) , pch=19, cex=0.8, col='firebrick4')
+
+
+
+
+ points(jitter(as.numeric(new$Substratum1), amount=0.1), jitter(new$Ysim, amount=0.05), pch=19, cex=0.8, col='cadetblue4')
+
+ ########################################### show random field for spatial ##########
+
+# Plot the spatial random field
+# Get the posterior mean of the spatial field at the mesh points:
+w.pm <- logistic(IMp$summary.random$w$mean)  
+w.sd <- logistic(IMp$summary.random$w$sd)
+length(w.pm)  #mu.srf
+# This is the spatial field calculated at all the mesh points
+
+
+# Now we calculate the spatial field on a grid. 
+wproj <- inla.mesh.projector(mesh.2.er, dims=c(1000,1000))   
+
+w.pm100_100 <- inla.mesh.project(wproj, w.pm)
+w.sd100_100 <- inla.mesh.project(wproj, w.sd)
+
+# This w.pm100_100 is of dimension 100 by 100 
+# and is a projection (interpolation and extrapolation) 
+# of the random field w. We can use the levelplot 
+# function from the lattice package to plot w.pm100_100
+
+Grid <- expand.grid(Xkm = wproj$x, 
+                    Ykm = wproj$y)
+Grid$w.pm <- as.vector(w.pm100_100)    
+Grid$w.sd <- as.vector(w.sd100_100)               
+
+col.r <- rev(rainbow(30, alpha = 0.35))
+u.proj <-  inla.mesh.projector(mesh.2.er, loc= coords.er)
+u.mean<- inla.mesh.project(u.proj, IMp$summary.random$w$mean)
+
+
+
+
+er.coast<- data.frame(st_coordinates(shore.er)[,1:2]/1000)
+
+levelplot(w.pm ~ Xkm * Ykm, add=T,
+          col.regions = col.r,
+          data = Grid, 
+          scales = list(draw = TRUE),
+          xlab = list("X-coordinates (km)", cex = 1.5),
+          ylab = list("Y-coordinates (km)", cex = 1.5),
+          main = list("Posterior mean spatial random field", cex = 1.5),
+          panel = function(...) {
+            panel.levelplot(...)  # Default levelplot
+            panel.points(er.coast[,1], er.coast[,2], pch = 16, col = "black", cex = 0.2)
+            panel.points(coords.er[,1], coords.er[,2], pch = 19, col = "black", cex = 0.5)  # Add points  # Add points
+          })
+
+
+
+levelplot(w.sd ~ Xkm * Ykm,
+          col.regions = col.r,
+          data = Grid, 
+          scales = list(draw = TRUE),
+          xlab = list("X-coordinates (km)", cex = 1.5),
+          ylab = list("Y-coordinates (km)", cex = 1.5),
+          main = list("Posterior sd spatial random field", cex = 1.5),
+          panel = function(...) {
+            panel.levelplot(...)  # Default levelplot
+            panel.points(er.coast[,1], er.coast[,2], pch = 16, col = "black", cex = 0.2)
+            panel.points(coords.er[,1], coords.er[,2], pch = 19, col = "black", cex = 0.5)  # Add points  # Add points
+          }) 
+ 
+ 
+
+
+
+
+```
+
+
+
+
+
+## INLA-SPDE approach Eriboll Spotted ray - model selection
+```{r}
+
+
+## random intercept with spatial correlation
+
+spde <- inla.spde2.matern(mesh.2.er, alpha = 2)
+
+
+## define spatial field
+
+w.index<- inla.spde.make.index(name='w', n.spde = spde$n.spde, n.group = 1, n.repl = 1)
+
+## define stack
+
+# start with model covariates
+met.dat.Ser.T$Substratum1<- as.factor(met.dat.Ser.T$Substratum1)
+levels(met.dat.Ser.T$Substratum1)
+head(met.dat.Ser.T)
+str(met.dat.Ser.T)
+
+met.dat.Ser.T$Year<- as.factor(met.dat.Ser.T$Year)
+
+
+dat.ERXm<- model.matrix( ~  -1+ depth +  Substratum1 + Year+ 
+                             depth:Substratum1 + depth:Year +
+                             Substratum1:Year,
+                         data=met.dat.Ser.T) 
+colnames(dat.ERXm)
+
+
+
+X<- data.frame(depth                       = dat.ERXm[,1],
+              Substratum1cob_boulder       = dat.ERXm[,2],
+              Substratum1gravel            = dat.ERXm[,3],
+              Substratum1mud               = dat.ERXm[,4],
+              Substratum1muddy_sand        = dat.ERXm[,5],
+              Substratum1rock              = dat.ERXm[,6],
+              Substratum1sand              = dat.ERXm[,7],
+              Year2022                     = dat.ERXm[,8],
+              Year2023                     = dat.ERXm[,9],
+              depth.Substratum1gravel      = dat.ERXm[,10],
+              depth.Substratum1mud         = dat.ERXm[,11],
+              depth.Substratum1muddy_sand  = dat.ERXm[,12],
+              depth.Substratum1rock        = dat.ERXm[,13],
+              depth.Substratum1sand        = dat.ERXm[,14], 
+              depth.Year2022               = dat.ERXm[,15],
+              depth.Year2023               = dat.ERXm[,16],
+              Substratum1gravel.Year2022   = dat.ERXm[,17],
+              Substratum1mud.Year2022      = dat.ERXm[,18],
+              Substratum1muddy_sand.Year2022  = dat.ERXm[,19],
+              Substratum1rock.Year2022    = dat.ERXm[,20],
+              Substratum1sand.Year2022     = dat.ERXm[,21],
+               Substratum1gravel.Year2023   = dat.ERXm[,22],
+              Substratum1mud.Year2023      = dat.ERXm[,23],
+              Substratum1muddy_sand.Year2023  = dat.ERXm[,24],
+              Substratum1rock.Year2023    = dat.ERXm[,25],
+              Substratum1sand.Year2023     = dat.ERXm[,26]    )
+
+
+N <- nrow(dat.ERXm)
+
+
+
+y.Sp<- dat.erT$pres.ab.SpottedRay
+
+
+
+
+StackFit.ER<- inla.stack(
+                      tag= 'Fit',
+                      data=list(y=y.Sp),
+                      A = list(1, 1, A1.er),
+                      effects = list(
+                        Intercept = rep(1,N),
+                        X=X,
+                        W = w.index))
+
+
+# define formula for spatial model similar to above
+
+f1<- y ~ -1 + Intercept + 
+              depth                       +
+              Substratum1cob_boulder       +
+              Substratum1gravel            +
+              Substratum1mud               +
+              Substratum1muddy_sand       +
+              Substratum1rock             +
+              Substratum1sand             +
+              Year2022                    +
+              Year2023                    +
+              depth.Substratum1gravel     +
+              depth.Substratum1mud        +
+              depth.Substratum1muddy_sand  +
+              depth.Substratum1rock        +
+              depth.Substratum1sand        + 
+              depth.Year2022               +
+              depth.Year2023              +
+              Substratum1gravel.Year2022   +
+              Substratum1mud.Year2022      +
+              Substratum1muddy_sand.Year2022 +
+              Substratum1rock.Year2022    +
+              Substratum1sand.Year2022     +
+               Substratum1gravel.Year2023   +
+              Substratum1mud.Year2023     +
+              Substratum1muddy_sand.Year2023 +
+              Substratum1rock.Year2023    +
+              Substratum1sand.Year2023     +   f(w, model = spde)# with spatial element and interaction
+  
+f2<- y ~ -1 +Intercept + 
+              depth                       +
+              Substratum1cob_boulder       +
+              Substratum1gravel            +
+              Substratum1mud               +
+              Substratum1muddy_sand       +
+              Substratum1rock             +
+              Substratum1sand             +
+              Year2022                    +
+              Year2023                    +
+              depth.Substratum1gravel     +
+              depth.Substratum1mud        +
+              depth.Substratum1muddy_sand  +
+              depth.Substratum1rock        +
+              depth.Substratum1sand        + 
+              depth.Year2022               +
+              depth.Year2023              +
+              f(w, model = spde) # remove substratum:year
+
+
+
+
+
+IM1<- inla(f1,
+           family = 'binomial',
+           data= inla.stack.data(StackFit.ER),
+           control.compute = list(
+               dic=TRUE,
+               waic=TRUE),
+           control.predictor = list(
+               A = inla.stack.A(StackFit.ER)))
+
+IM2<- inla(f2,
+           family = 'binomial',
+           data= inla.stack.data(StackFit.ER),
+           control.compute = list(
+               dic=TRUE,
+               waic=TRUE),
+           control.predictor = list(
+               A = inla.stack.A(StackFit.ER)))
+
+
+c(IM1$dic$dic, IM2$dic$dic)
+c(IM1$waic$waic, IM2$waic$waic) ## so better without substratum:year
+
+f3<- y ~ -1 + Intercept + 
+              depth                       +
+              Substratum1cob_boulder       +
+              Substratum1gravel            +
+              Substratum1mud               +
+              Substratum1muddy_sand       +
+              Substratum1rock             +
+              Substratum1sand             +
+              Year2022                    +
+              Year2023                    +
+              depth.Substratum1gravel     +
+              depth.Substratum1mud        +
+              depth.Substratum1muddy_sand  +
+              depth.Substratum1rock        +
+              depth.Substratum1sand        + 
+              
+              f(w, model = spde) # remove depth:year
+                
+
+
+
+
+IM3<- inla(f3,
+           family = 'binomial',
+           data= inla.stack.data(StackFit.ER),
+           control.compute = list(
+               dic=TRUE,
+               waic=TRUE),
+           control.predictor = list(
+               A = inla.stack.A(StackFit.ER)))
+
+c(IM2$dic$dic, IM3$dic$dic)
+c(IM2$waic$waic, IM3$waic$waic) ## so better without depth:year
+  
+
+
+ f4<- y ~ -1 + Intercept + 
+              depth                       +
+              Substratum1cob_boulder       +
+              Substratum1gravel            +
+              Substratum1mud               +
+              Substratum1muddy_sand       +
+              Substratum1rock             +
+              Substratum1sand             +
+             
+              depth.Substratum1gravel     +
+              depth.Substratum1mud        +
+              depth.Substratum1muddy_sand  +
+              depth.Substratum1rock        +
+              depth.Substratum1sand        + 
+              
+              f(w, model = spde) # remove depth:substratum
+ 
+ IM4<- inla(f4,
+           family = 'binomial',
+           data= inla.stack.data(StackFit.ER),
+           control.compute = list(
+               dic=TRUE,
+               waic=TRUE),
+           control.predictor = list(
+               A = inla.stack.A(StackFit.ER)))    
+ 
+ 
+c(IM3$dic$dic, IM4$dic$dic)
+c(IM3$waic$waic, IM4$waic$waic) ## so better without year
+ 
+f5<- y ~ -1 + Intercept + 
+              depth                       +
+              Substratum1cob_boulder       +
+              Substratum1gravel            +
+              Substratum1mud               +
+              Substratum1muddy_sand       +
+              Substratum1rock             +
+              Substratum1sand             +
+             
+                            f(w, model = spde) # remove depth:substratum
+ 
+ IM5<- inla(f5,
+           family = 'binomial',
+           data= inla.stack.data(StackFit.ER),
+           control.compute = list(
+               dic=TRUE,
+               waic=TRUE),
+           control.predictor = list(
+               A = inla.stack.A(StackFit.ER)))    
+ 
+ 
+c(IM4$dic$dic, IM5$dic$dic)
+c(IM4$waic$waic, IM5$waic$waic) ## so model with just depth:substratum
+
+
+```
+
+
+### Prior predictive simulation
+```{r}
+
+
+N<- nrow(dat.ERXm)
+head(dat.ERXm)
+X<- data.frame(Intercept                      = rep(1, N),
+              depth                       = dat.ERXm[,1],
+              Substratum1cob_boulder       = dat.ERXm[,2],
+              Substratum1gravel            = dat.ERXm[,3],
+              Substratum1mud               = dat.ERXm[,4],
+              Substratum1muddy_sand        = dat.ERXm[,5],
+              Substratum1rock              = dat.ERXm[,6],
+              Substratum1sand              = dat.ERXm[,7],
+              depth.Substratum1gravel   = dat.ERXm[,10],
+              depth.Substratum1mud      = dat.ERXm[,11],
+              depth.Substratum1muddy_sand  = dat.ERXm[,12],
+              depth.Substratum1rock    = dat.ERXm[,13],
+              depth.Substratum1sand     = dat.ERXm[,14]   )
+
+
+
+
+
+f4<- y ~ -1 + Intercept + 
+              depth                       +
+              Substratum1cob_boulder       +
+              Substratum1gravel            +
+              Substratum1mud               +
+              Substratum1muddy_sand       +
+              Substratum1rock             +
+              Substratum1sand             +
+             
+              depth.Substratum1gravel     +
+              depth.Substratum1mud        +
+              depth.Substratum1muddy_sand  +
+              depth.Substratum1rock        +
+              depth.Substratum1sand        + 
+             
+               f(w, model = spde)
+   
+    
+IM4<- inla(f4,
+           family = 'binomial',
+           data= inla.stack.data(StackFit.ER),
+           control.predictor = list(
+               A = inla.stack.A(StackFit.ER)))
+
+inla.set.control.fixed.default(IM4)
+
+ 
+## model interpretation
+
+out4<- IM4$summary.fixed
+
+
+# Assuming logistic() is defined as:
+logistic <- function(x) 1 / (1 + exp(-x))
+
+
+
+out4
+# prior sim
+
+
+######################################################## My priors ##############################
+
+
+
+mean_inter= -0.5
+  sd_inter = 0.05
+  mean = 0  # Prior mean for all fixed effects ---- here if we move to say -0.5 then it reduces the mean below 0 assuming less than 50% probability of seeing one
+ sd = 0.05 # SD for prior
+sd_depth=0.05
+
+
+sims=300
+outD<- out4
+outD[1,1]<- mean_inter
+outD[1,2]<- sd_inter
+outD[c(2:13),1]<- mean
+outD[c(2:13),2]<- sd
+outD[2,2]<- sd_depth
+outD
+
+
+##mean depth
+#x.hat<- mean(met.dat.Ser.T$depth)
+x.hat< -20
+################### some trial plots from these coefs 
+plot(NA, ylim=c(-0.1, 1.1), xlim=c(0.5,6.5), ylab='Probability of presence', xlab ='Substratum', yaxt='n', xaxt='n')
+axis(1, at= c(1,2,3,4,5,6), labels = levels(met.dat.Ser.T$Substratum1))
+axis(2, at= c(0,0.5, 1), labels = c(0,0.5, 1), las=2)
+
+
+
+# Function to draw logistic regression error
+
+run<- 'one'
+inter_coef<- c(0, outD[9, 1], outD[10, 1], outD[11, 1], outD[12, 1], outD[13, 1])
+inter_coef_sd<- c(0, outD[9, 2], outD[10, 2], outD[11, 2], outD[12, 2], outD[13, 2])
+
+## 2022
+loc_2022 <- seq(1, 6, by = 1) # x-positions for substrata
+
+ for (i in 1:6){
+
+  # Draw multiple points based on parameter uncertainties
+  for (j in 1:sims) {
+    # Sample intercept and slope from their distributions
+    sampled_intercept <- rnorm(1, mean = outD[1,1], sd = outD[1,2])
+    sampled_seabed <- rnorm(1, mean = outD[i+2,1], sd = outD[i+2,2])
+    sampled_depth <- rnorm(1, mean = outD[2,1], sd = outD[2,2]) *x.hat
+    sampled_interact <- rnorm(1, mean = inter_coef[i], inter_coef_sd[i])
+    if(run == 'one' ){
+   points( jitter(loc_2022[i], amount=0.1), logistic(sampled_intercept + sampled_seabed + sampled_depth), col = adjustcolor('mediumseagreen', alpha.f=0.5), pch=19, cex=0.7)
+    } else {
+      run <- 'next'
+      points( jitter(loc_2022[i], amount=0.1), logistic(sampled_intercept + sampled_seabed + sampled_depth + sampled_interact), col = adjustcolor('mediumseagreen', alpha.f=0.5), pch=19, cex=0.7)
+    }
+  
+ } }
+
+
+
+```
+
+###Prediction
+```{r}
+
+
+N<- nrow(dat.ERXm)
+head(dat.ERXm)
+X<- data.frame(Intercept                      = rep(1, N),
+              depth                       = dat.ERXm[,1],
+              Substratum1cob_boulder       = dat.ERXm[,2],
+              Substratum1gravel            = dat.ERXm[,3],
+              Substratum1mud               = dat.ERXm[,4],
+              Substratum1muddy_sand        = dat.ERXm[,5],
+              Substratum1rock              = dat.ERXm[,6],
+              Substratum1sand              = dat.ERXm[,7],
+              depth.Substratum1gravel   = dat.ERXm[,10],
+              depth.Substratum1mud      = dat.ERXm[,11],
+              depth.Substratum1muddy_sand  = dat.ERXm[,12],
+              depth.Substratum1rock    = dat.ERXm[,13],
+              depth.Substratum1sand     = dat.ERXm[,14]   )
+
+
+
+
+
+f4<- y ~ -1 + Intercept + 
+              depth                       +
+              Substratum1cob_boulder       +
+              Substratum1gravel            +
+              Substratum1mud               +
+              Substratum1muddy_sand       +
+              Substratum1rock             +
+              Substratum1sand             +
+             
+              depth.Substratum1gravel     +
+              depth.Substratum1mud        +
+              depth.Substratum1muddy_sand  +
+              depth.Substratum1rock        +
+              depth.Substratum1sand        + 
+             
+               f(w, model = spde)
+ 
+mean_inter= -0.5
+  sd_inter = 0.05
+  mean = 0  # Prior mean for all fixed effects ---- here if we move to say -0.5 then it reduces the mean below 0 assuming less than 50% probability of seeing one
+ sd = 0.05 # SD for prior
+sd_depth=0.05
+
+
+ IMp<- inla(f4,
+           family = 'binomial',
+           data= inla.stack.data(StackFit.ER),
+            control.compute = list(config= TRUE),
+           control.predictor = list(
+               A = inla.stack.A(StackFit.ER)),
+           control.fixed = list(
+            mean = list(Intercept =-0.5, default = 0),  # Prior mean for all fixed effects
+            prec = list(Intercept =prec(0.05) , default=prec(0.05), depth=prec(0.05)) # Prior precision (1 / variance)
+           ))
+
+out4<- IMp$summary.fixed
+
+print(out4, digits=2)
+
+##########
+
+# Logistic function definition
+logistic <- function(x) 1 / (1 + exp(-x))
+##mean depth
+x.hat<- -20
+################### some trial plots from these coefs 
+plot(NA, ylim=c(-0.1, 1.1), xlim=c(0.5,6.5), ylab='Probability of presence', xlab ='Substratum', yaxt='n', xaxt='n')
+axis(1, at= c(1,2,3,4,5,6), labels = levels(met.dat.Ser.T$Substratum1))
+axis(2, at= c(0,0.5, 1), labels = c(0,0.5, 1), las=2)
+
+
+
+loc <- seq(1, 6, by = 1) # x-positions for substrata
+int_par<- c( 0, out4[9,1], out4[10,1], out4[11,1], out4[12,1], out4[13,1])
+int_par_sd<- c( 0, out4[9,2], out4[10,2], out4[11,2], out4[12,2], out4[13,2])
+int_par_lo<- c( 0, out4[9,3], out4[10,3], out4[11,3], out4[12,3], out4[13,3])
+int_par_up<- c( 0, out4[9,5], out4[10,5], out4[11,5], out4[12,5], out4[13,5])
+
+
+for (i in 1:6){
+  
+points(loc[i], logistic(out4[1,1] + out4[i+2,1] + out4[2,1]*x.hat + int_par[i]*x.hat), pch=19, cex=2.5)
+arrows(loc[i], logistic(out4[1,3] + out4[i+2,3] + out4[2,3]*x.hat + int_par_lo[i]*x.hat), loc[i], logistic(out4[1,5] + out4[i+2,5] + out4[2,5]* x.hat+ int_par_up[i]*x.hat), angle=90, length=0.1, lwd=2.5, code=3)
+
+ 
+}
+
+# Function to draw logistic regression error - leave untill I sort the priors
+samps=100
+ for (i in 1:6){
+
+  # Draw multiple points based on parameter uncertainties
+  for (j in 1:samps) {
+    # Sample intercept and slope from their distributions
+    sampled_intercept <- rnorm(1, mean = out4[1,1], sd = out4[1,2])
+    sampled_seabed <- rnorm(1, mean = out4[i+2,1], sd = out4[i+2,2])
+    sampled_depth <- rnorm(1, mean = out4[2,1], sd = out4[2,2]) *x.hat
+    sampled_inter <- rnorm(1, mean = int_par[i], sd=int_par_sd[i])
+   points( jitter(loc[i], amount=0.1), logistic(sampled_intercept + sampled_seabed + sampled_depth), col = adjustcolor('black', alpha.f=0.5), pch=19, cex=0.7)
+  }
+   
+  } 
+
+
+
+
+
+# 
+ Sim<- inla.posterior.sample(n=1, result= IMp)
+
+ names(Sim[[1]])
+ Sim[[1]]$latent
+ Sim[[1]]$hyperpar
+ Sim[[1]]$logdens
+ length(Sim[[1]]$latent)
+
+ row.names(Sim[[1]]$latent)[3160:3172]
+
+ 
+ rownum<- as.numeric(c(3160:3172))
+ 
+ #Sim[[1]]$latent[c(3353,3354),]
+ 
+ Betas <- Sim[[1]]$latent[rownum]
+# 
+# 
+# just look for 
+Sim[[1]]$latent[1616,]
+Sim[[1]]$latent[3159,]
+
+ wk<- Sim[[1]]$latent[1616:3159,]
+ 
+ head(X)
+ Xm <- as.matrix(X)
+ 
+ Am <- as.matrix(A1.er)
+
+ 
+ FixedPart   <- Xm %*% Betas
+ SpatialPart <- Am %*% wk
+# 
+# 
+ mu   <- logistic(FixedPart + SpatialPart)
+
+ set.seed(666)
+ Ysim <- rbinom(n = N, size=1, prob =   mu)
+ Ysim
+
+ head(dat.er)
+ new<- cbind(met.dat.er, Ysim, dat.er$pres.ab.SpottedRay)
+ head(new)
+ names(new)[14]<- 'truth'
+ 
+ 
+ new$Substratum1<- as.factor(new$Substratum1)
+ 
+ 
+
+points(jitter(as.numeric(new$Substratum1), amount=0.1), jitter(new$truth, amount=0.05) , pch=19, cex=0.8, col='firebrick4')
+
+
+
+
+ points(jitter(as.numeric(new$Substratum1), amount=0.1), jitter(new$Ysim, amount=0.05), pch=19, cex=0.8, col='cadetblue4')
+
+ ########################################### show random field for spatial ##########
+
+# Plot the spatial random field
+# Get the posterior mean of the spatial field at the mesh points:
+w.pm <- logistic(IMp$summary.random$w$mean)  
+w.sd <- logistic(IMp$summary.random$w$sd)
+length(w.pm)  #mu.srf
+# This is the spatial field calculated at all the mesh points
+
+
+# Now we calculate the spatial field on a grid. 
+wproj <- inla.mesh.projector(mesh.2.er, dims=c(1000,1000))   
+
+w.pm100_100 <- inla.mesh.project(wproj, w.pm)
+w.sd100_100 <- inla.mesh.project(wproj, w.sd)
+
+# This w.pm100_100 is of dimension 100 by 100 
+# and is a projection (interpolation and extrapolation) 
+# of the random field w. We can use the levelplot 
+# function from the lattice package to plot w.pm100_100
+
+Grid <- expand.grid(Xkm = wproj$x, 
+                    Ykm = wproj$y)
+Grid$w.pm <- as.vector(w.pm100_100)   
+Grid$w.sd <- as.vector(w.sd100_100)               
+
+col.r <- rev(rainbow(30, alpha = 0.35))
+u.proj <-  inla.mesh.projector(mesh.2.er, loc= coords.er)
+u.mean<- inla.mesh.project(u.proj, IMp$summary.random$w$mean)
+
+
+
+
+er.coast<- data.frame(st_coordinates(shore.er)[,1:2]/1000)
+
+levelplot(w.pm ~ Xkm * Ykm, add=T,
+          col.regions = col.r,
+          data = Grid, 
+          scales = list(draw = TRUE),
+          xlab = list("X-coordinates (km)", cex = 1.5),
+          ylab = list("Y-coordinates (km)", cex = 1.5),
+          main = list("Posterior mean spatial random field", cex = 1.5),
+          panel = function(...) {
+            panel.levelplot(...)  # Default levelplot
+            panel.points(er.coast[,1], er.coast[,2], pch = 16, col = "black", cex = 0.2)
+            panel.points(coords.er[,1], coords.er[,2], pch = 19, col = "black", cex = 0.5)  # Add points  # Add points
+          })
+
+
+
+levelplot(w.sd ~ Xkm * Ykm,
+          col.regions = col.r,
+          data = Grid, 
+          scales = list(draw = TRUE),
+          xlab = list("X-coordinates (km)", cex = 1.5),
+          ylab = list("Y-coordinates (km)", cex = 1.5),
+          main = list("Posterior sd spatial random field", cex = 1.5),
+          panel = function(...) {
+            panel.levelplot(...)  # Default levelplot
+            panel.points(er.coast[,1], er.coast[,2], pch = 16, col = "black", cex = 0.2)
+            panel.points(coords.er[,1], coords.er[,2], pch = 19, col = "black", cex = 0.5)  # Add points  # Add points
+          }) 
+ 
+ 
+
+
+
+```
+
+
