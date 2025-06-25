@@ -21,7 +21,7 @@ Elasmobranchs are globally threatened and experiencing ongoing declines. Underst
 ```
 .
 ├── data/                      # CSV data files for species presence and environmental covariates
-├── Scotland_sharks.Rmd        # Master RMarkdown script for entire analysis workflow
+├── Temperate_elasmobranchs.Rmd        # Master RMarkdown script for entire analysis workflow
 ├── figures/                   # Model outputs, maps and summary figures
 ├── LICENSE
 ├── README.md
