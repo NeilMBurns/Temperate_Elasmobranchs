@@ -5,7 +5,7 @@ Repository containing analysis code, data, and supplementary materials supportin
 
 **Conservation relevant fine-scale distribution and habitat associations of threatened elasmobranchs in temperate nearshore waters**  
 Hopkins, C.R., Cullen, G., Flatt, R.L., Brooker, E.E., Bailey, D.M., and Burns, N.M.  
-Submitted to Conservation Biology, 20/06/2025  
+Submitted to XXXXXXXXXX  
 [DOI to follow]
 
 ---
