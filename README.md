@@ -81,7 +81,7 @@ If you use these materials, please cite:
 
 ```
 ###place holder #####
-Hopkins, C.R., Cullen, G., Flatt, R.L., Brooker, E.E., Bailey, D.M., Burns, N.M. (2025). Conservation Relevant Fine-Scale Distribution and Habitat Associations of Threatened Elasmobranchs in Temperate Nearshore Waters. [Journal]. DOI to follow.
+Hopkins, C.R., Cullen, G., Flatt, R.L., Brooker, E.E., Bailey, D.M., Burns, N.M. (2025). Conservation Relevant Fine-Scale Distribution and Habitat Associations of Threatened Elasmobranchs in Temperate Nearshore Waters. Aquatic Conservation: Marine and Freshwater Ecosystems. [DOI to follow].
 ```
 
 ---
