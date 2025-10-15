@@ -61,8 +61,8 @@ Data import and outputs will be saved to directories as selected by the user.
 ## 📊 Data Availability
 
 Code and data used to generate this manuscript’s analyses are available at:  
-👉 https://github.com/NeilMBurns/Temperate_Elasmobranchs  
-  A DOI will be issued via Figshare on publication.
+👉 https://doi.org/10.6084/m9.figshare.30366148.v1
+    DOI: 10.6084/m9.figshare.30366148
 
 ---
 
